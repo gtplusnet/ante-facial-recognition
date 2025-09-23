@@ -228,12 +228,14 @@ class FaceBoundingBoxOverlay extends StatelessWidget {
   final Rect? faceRect;
   final Size imageSize;
   final bool isDetecting;
+  final bool isFrontCamera;
 
   const FaceBoundingBoxOverlay({
     super.key,
     this.faceRect,
     required this.imageSize,
     this.isDetecting = false,
+    this.isFrontCamera = true,
   });
 
   @override
@@ -243,6 +245,7 @@ class FaceBoundingBoxOverlay extends StatelessWidget {
         faceRect: faceRect,
         imageSize: imageSize,
         isDetecting: isDetecting,
+        isFrontCamera: isFrontCamera,
       ),
       child: Container(),
     );
@@ -253,11 +256,13 @@ class FaceBoundingBoxPainter extends CustomPainter {
   final Rect? faceRect;
   final Size imageSize;
   final bool isDetecting;
+  final bool isFrontCamera;
 
   FaceBoundingBoxPainter({
     this.faceRect,
     required this.imageSize,
     this.isDetecting = false,
+    this.isFrontCamera = true,
   });
 
   @override
@@ -269,16 +274,65 @@ class FaceBoundingBoxPainter extends CustomPainter {
       ..strokeWidth = 3.0
       ..color = isDetecting ? Colors.green : Colors.blue;
 
-    // Scale the face rect to match the canvas size
-    final scaleX = size.width / imageSize.width;
-    final scaleY = size.height / imageSize.height;
+    // Calculate the camera preview aspect ratio (always landscape orientation)
+    // Note: imageSize is the camera image dimensions
+    final cameraAspectRatio = imageSize.width / imageSize.height;
 
-    final scaledRect = Rect.fromLTRB(
-      faceRect!.left * scaleX,
-      faceRect!.top * scaleY,
-      faceRect!.right * scaleX,
-      faceRect!.bottom * scaleY,
-    );
+    // Calculate the display aspect ratio (portrait mode)
+    final displayAspectRatio = size.width / size.height;
+
+    // Calculate how the camera preview is scaled to fill the display
+    // The preview uses AspectRatio with 1/cameraAspectRatio for portrait
+    final previewAspectRatio = 1 / cameraAspectRatio;
+
+    // Determine the scale to fill the container (same logic as camera preview)
+    double scale;
+    double offsetX = 0;
+    double offsetY = 0;
+
+    if (displayAspectRatio > previewAspectRatio) {
+      // Display is wider than preview - scale based on width
+      scale = displayAspectRatio / previewAspectRatio;
+      // Preview is taller, so it's cropped at top and bottom
+      final scaledHeight = size.height * scale;
+      final actualHeight = size.width / previewAspectRatio;
+      offsetY = (scaledHeight - actualHeight) / 2;
+    } else {
+      // Display is taller than preview - no additional scaling
+      scale = 1.0;
+      // Preview might be wider, so calculate any horizontal offset
+      final actualWidth = size.height * previewAspectRatio;
+      offsetX = (size.width - actualWidth) / 2;
+    }
+
+    // Calculate the actual scale factors for coordinates
+    // We need to swap width and height because camera is in landscape, display is in portrait
+    final scaleX = size.width / imageSize.height;  // Swapped
+    final scaleY = size.height / imageSize.width;  // Swapped
+
+    // Apply transformation
+    Rect transformedRect;
+    if (isFrontCamera) {
+      // For front camera, we need to:
+      // 1. Swap coordinates (because of rotation)
+      // 2. Mirror horizontally
+      transformedRect = Rect.fromLTRB(
+        size.width - (faceRect!.bottom * scaleX),  // Mirror and swap
+        faceRect!.left * scaleY,                   // Swap coordinates
+        size.width - (faceRect!.top * scaleX),     // Mirror and swap
+        faceRect!.right * scaleY,                  // Swap coordinates
+      );
+    } else {
+      // For back camera, just swap coordinates (because of rotation)
+      transformedRect = Rect.fromLTRB(
+        faceRect!.top * scaleX,     // Swap coordinates
+        faceRect!.left * scaleY,    // Swap coordinates
+        faceRect!.bottom * scaleX,  // Swap coordinates
+        faceRect!.right * scaleY,   // Swap coordinates
+      );
+    }
+
+    final scaledRect = transformedRect;
 
     canvas.drawRRect(
       RRect.fromRectAndRadius(scaledRect, const Radius.circular(10)),
@@ -345,6 +399,7 @@ class FaceBoundingBoxPainter extends CustomPainter {
   @override
   bool shouldRepaint(FaceBoundingBoxPainter oldDelegate) {
     return oldDelegate.faceRect != faceRect ||
-           oldDelegate.isDetecting != isDetecting;
+           oldDelegate.isDetecting != isDetecting ||
+           oldDelegate.isFrontCamera != isFrontCamera;
   }
 }

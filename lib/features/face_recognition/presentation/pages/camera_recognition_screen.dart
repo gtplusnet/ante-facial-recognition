@@ -28,9 +28,9 @@ class _CameraRecognitionScreenState extends State<CameraRecognitionScreen>
   CameraController? _cameraController;
   final FaceDetector _faceDetector = FaceDetector(
     options: FaceDetectorOptions(
-      enableContours: true,
+      enableContours: false,
       enableClassification: true,
-      enableTracking: true,
+      enableTracking: false,
       performanceMode: FaceDetectorMode.fast,
       minFaceSize: 0.15,
     ),

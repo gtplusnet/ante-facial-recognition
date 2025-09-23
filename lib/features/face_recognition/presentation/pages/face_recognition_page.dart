@@ -1,5 +1,6 @@
 import 'dart:ui' as ui;
 
+import 'package:camera/camera.dart' show CameraLensDirection;
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
@@ -12,6 +13,7 @@ import '../../../camera/presentation/widgets/camera_preview_widget.dart';
 import '../../../face_detection/presentation/bloc/face_detection_bloc.dart';
 import '../../../face_detection/presentation/bloc/face_detection_event.dart';
 import '../../../face_detection/presentation/bloc/face_detection_state.dart';
+import '../widgets/face_positioning_overlay.dart';
 
 class FaceRecognitionPage extends StatefulWidget {
   const FaceRecognitionPage({super.key});
@@ -54,6 +56,7 @@ class _FaceRecognitionPageState extends State<FaceRecognitionPage> {
         body: Stack(
           children: [
             _buildCameraView(),
+            _buildFacePositioningOverlay(),
             _buildOverlay(),
             _buildTopBar(),
             _buildBottomInfo(),
@@ -73,10 +76,28 @@ class _FaceRecognitionPageState extends State<FaceRecognitionPage> {
     );
   }
 
+  Widget _buildFacePositioningOverlay() {
+    return BlocBuilder<FaceDetectionBloc, FaceDetectionState>(
+      builder: (context, state) {
+        final isFaceDetected = state is FaceDetected;
+        final isGoodQuality = isFaceDetected && state.face.qualityScore > 0.6;
+
+        return FacePositioningOverlay(
+          isFaceDetected: isFaceDetected,
+          isGoodQuality: isGoodQuality,
+        );
+      },
+    );
+  }
+
   Widget _buildOverlay() {
     return BlocBuilder<FaceDetectionBloc, FaceDetectionState>(
       builder: (context, state) {
         if (state is FaceDetected) {
+          // Check if we're using the front camera
+          final isFrontCamera = _cameraDataSource.currentCamera?.lensDirection ==
+              CameraLensDirection.front;
+
           return FaceBoundingBoxOverlay(
             faceRect: Rect.fromLTWH(
               state.face.bounds.left,
@@ -86,6 +107,7 @@ class _FaceRecognitionPageState extends State<FaceRecognitionPage> {
             ),
             imageSize: ui.Size(state.imageSize.width, state.imageSize.height),
             isDetecting: true,
+            isFrontCamera: isFrontCamera,
           );
         }
         return const SizedBox.shrink();
