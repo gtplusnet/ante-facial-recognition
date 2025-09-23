@@ -10,17 +10,24 @@ import '../bloc/face_recognition_state.dart';
 class RecognitionFeedbackOverlay extends StatelessWidget {
   final Rect? faceBoundingBox;
   final double? faceQuality;
+  final bool isDialogShowing;
 
   const RecognitionFeedbackOverlay({
     super.key,
     this.faceBoundingBox,
     this.faceQuality,
+    this.isDialogShowing = false,
   });
 
   @override
   Widget build(BuildContext context) {
     return BlocBuilder<FaceRecognitionBloc, FaceRecognitionState>(
       builder: (context, state) {
+        // Hide all overlays when dialog is showing
+        if (isDialogShowing) {
+          return const SizedBox.shrink();
+        }
+
         return Stack(
           children: [
             // Face bounding box overlay
@@ -30,13 +37,63 @@ class RecognitionFeedbackOverlay extends StatelessWidget {
                 quality: faceQuality ?? 0.5,
               ),
 
-            // Status indicator
-            Positioned(
-              top: 100.h,
-              left: 0,
-              right: 0,
-              child: _StatusIndicator(state: state),
-            ),
+            // Status indicator (hide error states when dialog would show)
+            if (!(state is FaceRecognitionError))
+              Positioned(
+                top: 100.h,
+                left: 0,
+                right: 0,
+                child: _StatusIndicator(state: state),
+              ),
+
+            // 90% Quality Reached Indicator
+            if (faceQuality != null && faceQuality! >= 0.9)
+              Positioned(
+                top: 160.h,
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: Container(
+                    padding: EdgeInsets.symmetric(horizontal: 24.w, vertical: 12.h),
+                    decoration: BoxDecoration(
+                      color: Colors.green.withOpacity(0.9),
+                      borderRadius: BorderRadius.circular(25.r),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.green.withOpacity(0.3),
+                          blurRadius: 10,
+                          spreadRadius: 2,
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.star,
+                          color: Colors.white,
+                          size: 20.sp,
+                        ),
+                        SizedBox(width: 8.w),
+                        Text(
+                          '🎯 QUALITY: ${(faceQuality! * 100).toInt()}%',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 14.sp,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        SizedBox(width: 8.w),
+                        Icon(
+                          Icons.star,
+                          color: Colors.white,
+                          size: 20.sp,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
 
             // Instruction text
             Positioned(
@@ -46,8 +103,8 @@ class RecognitionFeedbackOverlay extends StatelessWidget {
               child: _InstructionText(state: state),
             ),
 
-            // Processing overlay
-            if (state is FaceRecognitionScanning || state is FaceRecognitionLoading)
+            // Processing overlay (only show when actually processing)
+            if (state is FaceRecognitionLoading || state is FaceRecognitionProcessing)
               Container(
                 color: Colors.black.withOpacity(0.3),
                 child: Center(
@@ -293,8 +350,9 @@ class _StatusIndicator extends StatelessWidget {
       );
       backgroundColor = Colors.red;
     } else if (state is FaceRecognitionReady) {
+      final readyState = state as FaceRecognitionReady;
       content = Text(
-        'Ready (${state.employeeCount} employees)',
+        'Ready (${readyState.employeeCount} employees)',
         style: TextStyle(
           color: Colors.white,
           fontSize: 14.sp,
@@ -344,19 +402,23 @@ class _InstructionText extends StatelessWidget {
     if (state is FaceRecognitionNoFace) {
       instruction = 'Position your face within the frame';
     } else if (state is FaceRecognitionPoorQuality) {
-      instruction = state.message;
+      final qualityState = state as FaceRecognitionPoorQuality;
+      instruction = qualityState.message;
     } else if (state is FaceRecognitionScanning) {
       instruction = 'Hold still...';
     } else if (state is FaceRecognitionLoading) {
       instruction = 'Verifying identity...';
     } else if (state is FaceRecognitionMatched) {
-      instruction = 'Welcome, ${state.employee.name}!';
+      final matchedState = state as FaceRecognitionMatched;
+      instruction = 'Welcome, ${matchedState.employee.name}!';
     } else if (state is FaceRecognitionUnknown) {
       instruction = 'Face not recognized. Please try again.';
     } else if (state is FaceRecognitionConfirmed) {
-      instruction = state.actionMessage;
+      final confirmedState = state as FaceRecognitionConfirmed;
+      instruction = confirmedState.actionMessage;
     } else if (state is FaceRecognitionError) {
-      instruction = state.message;
+      final errorState = state as FaceRecognitionError;
+      instruction = errorState.message;
     } else if (state is FaceRecognitionReady) {
       instruction = 'Look at the camera to start';
     } else {

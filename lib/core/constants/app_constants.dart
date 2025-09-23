@@ -10,7 +10,7 @@ class AppConstants {
   // Face Recognition
   static const double faceMatchThreshold = 0.6;
   static const double livenessThreshold = 0.9;
-  static const double qualityThreshold = 0.7;
+  static const double qualityThreshold = 0.9;
   static const int faceImageSize = 112;
   static const int embeddingSize = 128;
 

@@ -21,7 +21,7 @@ class FaceRecognitionConfig {
   // ============== Quality Thresholds ==============
 
   /// Minimum face quality score for recognition
-  static const double minFaceQuality = 0.7;
+  static const double minFaceQuality = 0.9;
 
   /// Minimum confidence for face detection
   static const double minDetectionConfidence = 0.8;
@@ -135,7 +135,7 @@ class FaceRecognitionConfig {
     }
 
     // Adjust for face quality
-    if (faceQuality < 0.7) {
+    if (faceQuality < 0.9) {
       threshold += 0.05;
     }
 

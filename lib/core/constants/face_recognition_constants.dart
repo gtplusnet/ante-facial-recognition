@@ -5,7 +5,7 @@ class FaceRecognitionConstants {
 
   // Face matching thresholds
   static const double faceMatchThreshold = 0.6; // Euclidean distance threshold
-  static const double qualityThreshold = 0.7; // Minimum face quality score
+  static const double qualityThreshold = 0.9; // Minimum face quality score
   static const double livenessThreshold = 0.9; // Liveness detection confidence
 
   // Model dimensions

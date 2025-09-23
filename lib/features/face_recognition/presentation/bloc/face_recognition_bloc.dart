@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:camera/camera.dart' as camera;
@@ -8,6 +7,7 @@ import 'package:injectable/injectable.dart';
 import '../../../../core/utils/logger.dart';
 import '../../../employee/domain/entities/employee.dart';
 import '../../../employee/data/models/face_encoding_model.dart';
+import '../../../employee/data/datasources/employee_local_datasource.dart';
 import '../../../face_detection/data/services/face_detection_service.dart';
 import '../../../face_detection/domain/entities/face_detection_result.dart';
 import '../../../camera/data/datasources/camera_data_source.dart';
@@ -23,6 +23,7 @@ class FaceRecognitionBloc extends Bloc<FaceRecognitionEvent, FaceRecognitionStat
   final FaceDetectionService _faceDetectionService;
   final CameraDataSource _cameraDataSource;
   final FaceRecognitionService _recognitionService;
+  final EmployeeLocalDataSource _employeeDataSource;
 
   // Mock employee database (in production, this would come from a repository)
   final Map<String, Employee> _employeeDatabase = {};
@@ -32,17 +33,19 @@ class FaceRecognitionBloc extends Bloc<FaceRecognitionEvent, FaceRecognitionStat
   final List<FaceMatchResult> _recognitionHistory = [];
 
   bool _isProcessing = false;
-  Timer? _recognitionTimer;
+  // Timer removed - ProcessCameraFrame is triggered by face detection events
 
   FaceRecognitionBloc({
     required FaceEncodingService faceEncodingService,
     required FaceDetectionService faceDetectionService,
     required CameraDataSource cameraDataSource,
     required FaceRecognitionService recognitionService,
+    required EmployeeLocalDataSource employeeDataSource,
   })  : _faceEncodingService = faceEncodingService,
         _faceDetectionService = faceDetectionService,
         _cameraDataSource = cameraDataSource,
         _recognitionService = recognitionService,
+        _employeeDataSource = employeeDataSource,
         super(const FaceRecognitionInitial()) {
     on<InitializeFaceRecognition>(_onInitializeFaceRecognition);
     on<StartRecognition>(_onStartRecognition);
@@ -74,8 +77,8 @@ class FaceRecognitionBloc extends Bloc<FaceRecognitionEvent, FaceRecognitionStat
         await _cameraDataSource.initializeCamera();
       }
 
-      // Load employees (in production, from API/database)
-      await _loadMockEmployees();
+      // Load employees from local database
+      await _loadEmployeesFromDatabase();
 
       emit(FaceRecognitionReady(
         employeeCount: _employeeDatabase.length,
@@ -93,23 +96,27 @@ class FaceRecognitionBloc extends Bloc<FaceRecognitionEvent, FaceRecognitionStat
     Emitter<FaceRecognitionState> emit,
   ) async {
     try {
-      if (state is! FaceRecognitionReady) {
-        emit(const FaceRecognitionError('Service not ready'));
+      // Allow starting recognition from multiple states for continuous operation
+      if (state is FaceRecognitionReady ||
+          state is FaceRecognitionPoorQuality ||
+          state is FaceRecognitionNoFace ||
+          state is FaceRecognitionUnknown ||
+          state is FaceRecognitionMatched ||
+          state is FaceRecognitionError ||
+          state is FaceRecognitionScanning) {
+        // Camera stream is already started by CameraPreviewWidget
+        // which sends images to FaceDetectionBloc
+
+        emit(const FaceRecognitionScanning());
+
+        // ProcessCameraFrame will be triggered by face detection events
+        // instead of a timer to avoid unnecessary processing
+
+        Logger.info('Face recognition started - waiting for face detection');
+      } else {
+        emit(const FaceRecognitionError('Service not initialized'));
         return;
       }
-
-      // Start camera stream
-      await _cameraDataSource.startImageStream(_processCameraImage);
-
-      emit(const FaceRecognitionScanning());
-
-      // Start periodic processing timer
-      _recognitionTimer = Timer.periodic(
-        const Duration(milliseconds: 500),
-        (_) => add(const ProcessCameraFrame()),
-      );
-
-      Logger.info('Face recognition started');
     } catch (e) {
       Logger.error('Failed to start recognition', error: e);
       emit(FaceRecognitionError(e.toString()));
@@ -121,8 +128,8 @@ class FaceRecognitionBloc extends Bloc<FaceRecognitionEvent, FaceRecognitionStat
     Emitter<FaceRecognitionState> emit,
   ) async {
     try {
-      _recognitionTimer?.cancel();
-      await _cameraDataSource.stopImageStream();
+      // No timer to cancel since ProcessCameraFrame is triggered by face detection
+      // Camera stream is managed by CameraPreviewWidget
       _isProcessing = false;
 
       emit(FaceRecognitionReady(
@@ -136,32 +143,25 @@ class FaceRecognitionBloc extends Bloc<FaceRecognitionEvent, FaceRecognitionStat
     }
   }
 
-  camera.CameraImage? _latestCameraImage;
-
-  void _processCameraImage(camera.CameraImage image) {
-    _latestCameraImage = image;
-  }
-
   Future<void> _onProcessCameraFrame(
     ProcessCameraFrame event,
     Emitter<FaceRecognitionState> emit,
   ) async {
-    if (_isProcessing || _latestCameraImage == null) return;
+    if (_isProcessing) return;
     if (state is! FaceRecognitionScanning) return;
 
     _isProcessing = true;
     try {
-      final cameraImage = _latestCameraImage!;
+      // Get camera description
       final cameraDesc = _cameraDataSource.currentCamera;
-
       if (cameraDesc == null) {
         _isProcessing = false;
         return;
       }
 
-      // Extract face encoding from camera image
+      // Extract face encoding from camera image passed through the event
       final encodingResult = await _faceEncodingService.extractFromCameraImage(
-        cameraImage,
+        event.cameraImage,
         cameraDesc,
       );
 
@@ -172,7 +172,7 @@ class FaceRecognitionBloc extends Bloc<FaceRecognitionEvent, FaceRecognitionStat
       }
 
       // Check face quality
-      if (encodingResult.quality < 0.7) {
+      if (encodingResult.quality < 0.9) {
         emit(FaceRecognitionPoorQuality(
           quality: encodingResult.quality,
           message: 'Please face the camera directly in good lighting',
@@ -250,8 +250,8 @@ class FaceRecognitionBloc extends Bloc<FaceRecognitionEvent, FaceRecognitionStat
     try {
       emit(const FaceRecognitionLoading());
 
-      // In production, load from API/database
-      await _loadMockEmployees();
+      // Load from local database
+      await _loadEmployeesFromDatabase();
 
       emit(FaceRecognitionReady(
         employeeCount: _employeeDatabase.length,
@@ -291,34 +291,43 @@ class FaceRecognitionBloc extends Bloc<FaceRecognitionEvent, FaceRecognitionStat
     emit(const FaceRecognitionScanning());
   }
 
-  Future<void> _loadMockEmployees() async {
-    // In production, this would load from API/database
-    // For now, create mock employees
-    final mockEmployees = [
-      const Employee(
-        id: '1',
-        name: 'John Doe',
-        email: 'john.doe@company.com',
-        department: 'Engineering',
-        position: 'Software Engineer',
-        employeeCode: 'EMP001',
-      ),
-      const Employee(
-        id: '2',
-        name: 'Jane Smith',
-        email: 'jane.smith@company.com',
-        department: 'Marketing',
-        position: 'Marketing Manager',
-        employeeCode: 'EMP002',
-      ),
-    ];
+  Future<void> _loadEmployeesFromDatabase() async {
+    try {
+      // Load employees from local database
+      final employees = await _employeeDataSource.getAllEmployees();
 
-    for (final employee in mockEmployees) {
-      _employeeDatabase[employee.id] = employee;
-      // In production, load actual face encodings from database
+      _employeeDatabase.clear();
+      _employeeEncodings.clear();
+
+      int loadedWithEncodings = 0;
+
+      for (final employee in employees) {
+        _employeeDatabase[employee.id] = employee;
+
+        // Load face encodings if available
+        if (employee.hasFaceEncodings) {
+          // Use the first face encoding (from photo)
+          final firstEncoding = employee.faceEncodings.first;
+          _employeeEncodings[employee.id] = firstEncoding.embedding;
+          loadedWithEncodings++;
+          Logger.debug('Loaded face encoding for ${employee.name}');
+        } else {
+          Logger.warning('No face encoding for ${employee.name}');
+        }
+      }
+
+      Logger.info('Loaded ${employees.length} employees (${loadedWithEncodings} with face encodings)');
+    } catch (e) {
+      Logger.error('Failed to load employees from database', error: e);
+      // Fall back to empty database
+      _employeeDatabase.clear();
+      _employeeEncodings.clear();
     }
+  }
 
-    Logger.info('Loaded ${mockEmployees.length} mock employees');
+  Future<void> _loadMockEmployees() async {
+    // Deprecated - now using actual database
+    await _loadEmployeesFromDatabase();
   }
 
   Future<void> _onRecognizeFaceWithTopK(
@@ -412,7 +421,6 @@ class FaceRecognitionBloc extends Bloc<FaceRecognitionEvent, FaceRecognitionStat
 
   @override
   Future<void> close() {
-    _recognitionTimer?.cancel();
     _faceEncodingService.dispose();
     _faceDetectionService.dispose();
     return super.close();
