@@ -342,10 +342,15 @@ class _CameraRecognitionScreenState extends State<CameraRecognitionScreen>
         child: Stack(
           fit: StackFit.expand,
           children: [
-            // Camera preview
+            // Camera preview with mirroring for front camera
             if (_cameraController != null &&
                 _cameraController!.value.isInitialized)
-              CameraPreview(_cameraController!)
+              Transform(
+                alignment: Alignment.center,
+                transform: Matrix4.identity()
+                  ..scale(-1.0, 1.0), // Mirror horizontally
+                child: CameraPreview(_cameraController!),
+              )
             else
               const Center(
                 child: CircularProgressIndicator(

@@ -151,25 +151,51 @@ class _CameraPreviewWidgetState extends State<CameraPreviewWidget>
   }
 
   Widget _buildCamera(camera.CameraController controller) {
+    // Get the device orientation
+    final orientation = MediaQuery.of(context).orientation;
+
     return ClipRect(
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final aspectRatio = controller.value.aspectRatio;
-          final screenAspectRatio = constraints.maxWidth / constraints.maxHeight;
+          // Get the camera aspect ratio (width/height in landscape mode)
+          // Note: CameraController aspectRatio is always in landscape orientation
+          final cameraAspectRatio = controller.value.aspectRatio;
 
+          // Calculate the preview aspect ratio based on device orientation
+          final previewAspectRatio = orientation == Orientation.portrait
+              ? 1 / cameraAspectRatio  // Invert for portrait
+              : cameraAspectRatio;      // Keep as is for landscape
+
+          // Calculate the container aspect ratio
+          final containerAspectRatio = constraints.maxWidth / constraints.maxHeight;
+
+          // Calculate scale to fill the container while maintaining aspect ratio
           double scale;
-          if (aspectRatio > screenAspectRatio) {
-            scale = constraints.maxHeight / (constraints.maxWidth / aspectRatio);
+          if (containerAspectRatio > previewAspectRatio) {
+            // Container is wider than preview - scale based on width
+            scale = containerAspectRatio / previewAspectRatio;
           } else {
-            scale = constraints.maxWidth / (constraints.maxHeight * aspectRatio);
+            // Container is taller than preview - scale based on height
+            scale = 1.0; // No additional scaling needed
           }
 
-          return Transform.scale(
-            scale: scale,
+          // Check if we're using the front camera (usually index 1)
+          final isFrontCamera = controller.description.lensDirection ==
+              camera.CameraLensDirection.front;
+
+          return Container(
+            width: constraints.maxWidth,
+            height: constraints.maxHeight,
+            color: Colors.black,
             child: Center(
-              child: AspectRatio(
-                aspectRatio: aspectRatio,
-                child: camera.CameraPreview(controller),
+              child: Transform(
+                alignment: Alignment.center,
+                transform: Matrix4.identity()
+                  ..scale(scale * (isFrontCamera ? -1.0 : 1.0), scale),
+                child: AspectRatio(
+                  aspectRatio: previewAspectRatio,
+                  child: camera.CameraPreview(controller),
+                ),
               ),
             ),
           );

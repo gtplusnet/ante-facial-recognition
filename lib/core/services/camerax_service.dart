@@ -21,10 +21,12 @@ class CameraXService {
   int? _textureId;
   bool _isInitialized = false;
   bool _isStreaming = false;
+  int _currentLensFacing = 0; // 0 = back camera, 1 = front camera
 
   int? get textureId => _textureId;
   bool get isInitialized => _isInitialized;
   bool get isStreaming => _isStreaming;
+  int get currentLensFacing => _currentLensFacing;
 
   CameraXService() {
     _setupMethodCallHandler();
@@ -90,6 +92,9 @@ class CameraXService {
       _textureId = result['textureId'] as int?;
       final int previewWidth = result['previewWidth'] as int;
       final int previewHeight = result['previewHeight'] as int;
+
+      // Set the initial lens facing (default to front camera for facial recognition)
+      _currentLensFacing = result['lensFacing'] as int? ?? 1;
 
       if (_textureId == null) {
         throw CameraException(message: 'Failed to get texture ID from CameraX');
@@ -160,7 +165,10 @@ class CameraXService {
 
       await _channel.invokeMethod('switchCamera');
 
-      Logger.success('Camera switched');
+      // Toggle the current lens facing
+      _currentLensFacing = _currentLensFacing == 0 ? 1 : 0;
+
+      Logger.success('Camera switched to ${_currentLensFacing == 0 ? "back" : "front"}');
     } catch (e) {
       Logger.error('Failed to switch camera', error: e);
       throw CameraException(message: 'Failed to switch camera: $e');

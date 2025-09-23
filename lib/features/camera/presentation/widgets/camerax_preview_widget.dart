@@ -105,34 +105,50 @@ class _CameraXPreviewWidgetState extends State<CameraXPreviewWidget> {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        // Calculate aspect ratio
-        final double previewAspectRatio =
-            _initResult!.previewWidth / _initResult!.previewHeight;
+        // Get device orientation
+        final orientation = MediaQuery.of(context).orientation;
+
+        // Camera dimensions are typically in landscape orientation
+        // For portrait mode, we need to swap width and height
+        final double cameraWidth = orientation == Orientation.portrait
+            ? _initResult!.previewHeight.toDouble()
+            : _initResult!.previewWidth.toDouble();
+        final double cameraHeight = orientation == Orientation.portrait
+            ? _initResult!.previewWidth.toDouble()
+            : _initResult!.previewHeight.toDouble();
+
+        // Calculate aspect ratios
+        final double cameraAspectRatio = cameraWidth / cameraHeight;
         final double screenAspectRatio =
             constraints.maxWidth / constraints.maxHeight;
 
-        // Determine preview size based on fit mode
+        // Calculate scale and dimensions to maintain aspect ratio
+        double scale;
         double previewWidth;
         double previewHeight;
 
         if (widget.fit == BoxFit.cover) {
-          // Fill the entire area, cropping if necessary
-          if (screenAspectRatio > previewAspectRatio) {
-            previewWidth = constraints.maxWidth;
-            previewHeight = constraints.maxWidth / previewAspectRatio;
+          // Fill the container, cropping if necessary
+          if (screenAspectRatio > cameraAspectRatio) {
+            // Screen is wider than camera
+            scale = constraints.maxWidth / cameraWidth;
           } else {
-            previewHeight = constraints.maxHeight;
-            previewWidth = constraints.maxHeight * previewAspectRatio;
+            // Screen is taller than camera
+            scale = constraints.maxHeight / cameraHeight;
           }
+          previewWidth = cameraWidth * scale;
+          previewHeight = cameraHeight * scale;
         } else {
-          // Contain - fit the entire preview, with black bars if necessary
-          if (screenAspectRatio > previewAspectRatio) {
-            previewHeight = constraints.maxHeight;
-            previewWidth = constraints.maxHeight * previewAspectRatio;
+          // Fit entire preview, with black bars if necessary
+          if (screenAspectRatio > cameraAspectRatio) {
+            // Screen is wider than camera
+            scale = constraints.maxHeight / cameraHeight;
           } else {
-            previewWidth = constraints.maxWidth;
-            previewHeight = constraints.maxWidth / previewAspectRatio;
+            // Screen is taller than camera
+            scale = constraints.maxWidth / cameraWidth;
           }
+          previewWidth = cameraWidth * scale;
+          previewHeight = cameraHeight * scale;
         }
 
         return Stack(
@@ -141,15 +157,26 @@ class _CameraXPreviewWidgetState extends State<CameraXPreviewWidget> {
             // Black background
             Container(color: Colors.black),
 
-            // Camera preview
+            // Camera preview with proper clipping
             ClipRect(
-              child: OverflowBox(
-                maxWidth: previewWidth,
-                maxHeight: previewHeight,
-                child: SizedBox(
-                  width: previewWidth,
-                  height: previewHeight,
-                  child: Texture(textureId: _initResult!.textureId),
+              child: SizedBox(
+                width: constraints.maxWidth,
+                height: constraints.maxHeight,
+                child: OverflowBox(
+                  maxWidth: previewWidth,
+                  maxHeight: previewHeight,
+                  child: SizedBox(
+                    width: previewWidth,
+                    height: previewHeight,
+                    child: Transform(
+                      alignment: Alignment.center,
+                      // Mirror the preview for front camera
+                      transform: widget.cameraXService.currentLensFacing == 1
+                          ? Matrix4.identity()..scale(-1.0, 1.0)
+                          : Matrix4.identity(),
+                      child: Texture(textureId: _initResult!.textureId),
+                    ),
+                  ),
                 ),
               ),
             ),
