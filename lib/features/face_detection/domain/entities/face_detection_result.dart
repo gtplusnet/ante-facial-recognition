@@ -34,32 +34,33 @@ class FaceDetectionResult extends Equatable {
   double get qualityScore {
     double score = 1.0;
 
-    // Check face angle (should be facing camera)
+    // Very lenient quality scoring - allow almost any face angle
+    // Allow angles up to 90 degrees with minimal penalty
     if (rotationX != null) {
-      final xScore = 1.0 - (rotationX!.abs() / 45.0).clamp(0.0, 1.0);
-      score *= xScore;
+      final xScore = 1.0 - (rotationX!.abs() / 90.0).clamp(0.0, 1.0);
+      score *= (xScore * 0.5 + 0.5); // Minimum score of 0.5 even at max angle
     }
     if (rotationY != null) {
-      final yScore = 1.0 - (rotationY!.abs() / 45.0).clamp(0.0, 1.0);
-      score *= yScore;
+      final yScore = 1.0 - (rotationY!.abs() / 90.0).clamp(0.0, 1.0);
+      score *= (yScore * 0.5 + 0.5); // Minimum score of 0.5 even at max angle
     }
     if (rotationZ != null) {
-      final zScore = 1.0 - (rotationZ!.abs() / 45.0).clamp(0.0, 1.0);
-      score *= zScore;
+      final zScore = 1.0 - (rotationZ!.abs() / 90.0).clamp(0.0, 1.0);
+      score *= (zScore * 0.5 + 0.5); // Minimum score of 0.5 even at max angle
     }
 
-    // Check if eyes are open
-    if (leftEyeOpenProbability != null && leftEyeOpenProbability! < 0.5) {
-      score *= 0.5;
+    // Eyes open check is optional - minimal penalty
+    if (leftEyeOpenProbability != null && leftEyeOpenProbability! < 0.2) {
+      score *= 0.9; // Very minimal penalty for closed eyes
     }
-    if (rightEyeOpenProbability != null && rightEyeOpenProbability! < 0.5) {
-      score *= 0.5;
+    if (rightEyeOpenProbability != null && rightEyeOpenProbability! < 0.2) {
+      score *= 0.9; // Very minimal penalty for closed eyes
     }
 
     return score;
   }
 
-  bool get isGoodQuality => qualityScore >= 0.7;
+  bool get isGoodQuality => qualityScore >= 0.3;
 
   @override
   List<Object?> get props => [

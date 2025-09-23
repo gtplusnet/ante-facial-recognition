@@ -5,9 +5,10 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 
-import '../../../../app/injection.dart';
+import '../../../../core/di/injection.dart';
 import '../../../../core/utils/logger.dart';
 import '../../../employee/presentation/bloc/employee_bloc.dart';
+import '../../../employee/presentation/bloc/employee_event.dart' as employee_events;
 import '../bloc/face_recognition_bloc.dart';
 import '../bloc/face_recognition_event.dart';
 import '../bloc/face_recognition_state.dart';
@@ -47,9 +48,16 @@ class _CameraRecognitionScreenState extends State<CameraRecognitionScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+
+    // Schedule face recognition initialization after the first frame
+    // This ensures context is properly built
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _initializeFaceRecognition();
+    });
+
+    // Initialize camera
     _initializeCamera();
-    _initializeFaceRecognition();
-    
+
     // Set system UI overlays
     SystemChrome.setEnabledSystemUIMode(
       SystemUiMode.manual,
@@ -121,11 +129,15 @@ class _CameraRecognitionScreenState extends State<CameraRecognitionScreen>
   }
 
   void _initializeFaceRecognition() {
-    // Initialize face recognition
+    Logger.info('Initializing face recognition from camera screen');
+
+    // Initialize face recognition with employees from database
     context.read<FaceRecognitionBloc>().add(const InitializeFaceRecognition());
-    
-    // Load employees
-    context.read<EmployeeBloc>().add(const LoadEmployees());
+
+    // Also ensure employees are loaded in EmployeeBloc
+    context.read<EmployeeBloc>().add(const employee_events.LoadEmployees());
+
+    Logger.info('Face recognition initialization events dispatched');
   }
 
   void _startImageStream() {
@@ -199,18 +211,22 @@ class _CameraRecognitionScreenState extends State<CameraRecognitionScreen>
 
       // Only process for recognition if quality is good AND face is in target area
       if (quality > 0.6 && isInTargetArea) {
-        final state = context.read<FaceRecognitionBloc>().state;
-        
+        final recognitionBloc = context.read<FaceRecognitionBloc>();
+        final state = recognitionBloc.state;
+
         // Only process if we're in a ready state (not already processing)
-        if (state is FaceRecognitionReady || 
+        if (state is FaceRecognitionReady ||
             state is FaceRecognitionNoFace ||
-            state is FaceRecognitionUnknown) {
-          context.read<FaceRecognitionBloc>().add(
-            ProcessCameraFrame(
-              image: image,
-              face: face,
-            ),
-          );
+            state is FaceRecognitionUnknown ||
+            state is FaceRecognitionScanning) {
+
+          // Start recognition if not already started
+          if (state is FaceRecognitionReady) {
+            recognitionBloc.add(const StartRecognition());
+          } else {
+            // Process the frame for face recognition
+            recognitionBloc.add(const ProcessCameraFrame());
+          }
         }
       }
     } catch (e) {
@@ -235,23 +251,16 @@ class _CameraRecognitionScreenState extends State<CameraRecognitionScreen>
 
       // Calculate image dimensions
       final plane = image.planes.first;
-      final planeData = InputImagePlaneMetadata(
-        bytesPerRow: plane.bytesPerRow,
-        height: plane.height ?? image.height,
-        width: plane.width ?? image.width,
-      );
-
-      // Create InputImage
-      final inputImageData = InputImageData(
+      final planeData = InputImageMetadata(
         size: Size(image.width.toDouble(), image.height.toDouble()),
-        imageRotation: rotation,
-        inputImageFormat: format,
-        planeData: [planeData],
+        rotation: rotation,
+        format: format,
+        bytesPerRow: plane.bytesPerRow,
       );
 
       return InputImage.fromBytes(
         bytes: image.planes[0].bytes,
-        inputImageData: inputImageData,
+        metadata: planeData,
       );
     } catch (e) {
       Logger.error('Error converting camera image', error: e);
@@ -510,7 +519,7 @@ class _CameraRecognitionScreenState extends State<CameraRecognitionScreen>
                           label: 'Sync',
                           onPressed: () {
                             context.read<EmployeeBloc>().add(
-                              const SyncEmployees(),
+                              const employee_events.SyncEmployees(),
                             );
                           },
                         ),

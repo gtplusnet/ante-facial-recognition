@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:dartz/dartz.dart';
 import 'package:injectable/injectable.dart';
 
@@ -5,6 +7,7 @@ import '../../../../core/error/failures.dart';
 import '../../../../core/storage/secure_storage_helper.dart';
 import '../../../../core/usecases/usecase.dart';
 import '../../../../core/utils/logger.dart';
+import '../../../face_recognition/data/services/face_encoding_service.dart';
 import '../../data/datasources/employee_local_datasource.dart';
 import '../../data/datasources/manpower_api_service.dart';
 import '../../data/models/employee_model.dart';
@@ -33,12 +36,14 @@ class SyncEmployeesUseCase implements UseCase<SyncResult, NoParams> {
   final ManpowerApiService _apiService;
   final EmployeeLocalDataSource _localDataSource;
   final SecureStorageHelper _secureStorage;
+  final FaceEncodingService _faceEncodingService;
 
   const SyncEmployeesUseCase(
     this._repository,
     this._apiService,
     this._localDataSource,
     this._secureStorage,
+    this._faceEncodingService,
   );
 
   @override
@@ -108,14 +113,59 @@ class SyncEmployeesUseCase implements UseCase<SyncResult, NoParams> {
             );
 
             if (photoBytes != null) {
-              // Update employee with photo bytes
-              final updatedEmployee = employee.copyWith(photoBytes: photoBytes);
+              // Generate face embedding from photo
+              Logger.debug('  - Generating face embedding for ${employee.name}');
 
-              // Save to local database (convert to model)
-              await _localDataSource.saveEmployee(
-                EmployeeModel.fromEntity(updatedEmployee),
-              );
-              syncedCount++;
+              try {
+                // Initialize face encoding service if not already initialized
+                await _faceEncodingService.initialize();
+
+                final encodingResult = await _faceEncodingService.extractFromImageBytes(photoBytes);
+
+                if (encodingResult != null) {
+                  Logger.success('  - Generated face embedding for ${employee.name}');
+
+                  // Create a FaceEncoding object from the result
+                  final faceEncoding = FaceEncoding(
+                    id: '${employee.id}_photo_${DateTime.now().millisecondsSinceEpoch}',
+                    embedding: encodingResult.embedding,
+                    quality: encodingResult.quality,
+                    createdAt: DateTime.now(),
+                    source: 'photo',
+                    metadata: {
+                      'processingTime': encodingResult.processingTime.inMilliseconds,
+                    },
+                  );
+
+                  // Update employee with photo bytes and face encoding
+                  final updatedEmployee = employee.copyWith(
+                    photoBytes: photoBytes,
+                    faceEncodings: [faceEncoding],
+                  );
+
+                  // Save to local database (convert to model)
+                  await _localDataSource.saveEmployee(
+                    EmployeeModel.fromEntity(updatedEmployee),
+                  );
+                  syncedCount++;
+                } else {
+                  Logger.warning('  - Could not generate face embedding for ${employee.name} (no face detected)');
+                  // Save with photo but without embedding
+                  final updatedEmployee = employee.copyWith(photoBytes: photoBytes);
+                  await _localDataSource.saveEmployee(
+                    EmployeeModel.fromEntity(updatedEmployee),
+                  );
+                  syncedCount++;
+                }
+              } catch (embeddingError) {
+                Logger.error('  - Failed to generate embedding for ${employee.name}', error: embeddingError);
+                // Save with photo but without embedding
+                final updatedEmployee = employee.copyWith(photoBytes: photoBytes);
+                await _localDataSource.saveEmployee(
+                  EmployeeModel.fromEntity(updatedEmployee),
+                );
+                syncedCount++;
+              }
             } else {
               // Save without photo
               await _localDataSource.saveEmployee(

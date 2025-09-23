@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:camera/camera.dart';
 import 'package:equatable/equatable.dart';
 
 import '../../../employee/domain/entities/employee.dart';
@@ -26,7 +27,12 @@ class StopRecognition extends FaceRecognitionEvent {
 }
 
 class ProcessCameraFrame extends FaceRecognitionEvent {
-  const ProcessCameraFrame();
+  final CameraImage cameraImage;
+
+  const ProcessCameraFrame(this.cameraImage);
+
+  @override
+  List<Object> get props => [cameraImage];
 }
 
 /// Event for recognizing face with top-K matching

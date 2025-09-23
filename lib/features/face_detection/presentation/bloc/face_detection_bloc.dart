@@ -101,6 +101,7 @@ class FaceDetectionBloc extends Bloc<FaceDetectionEvent, FaceDetectionState> {
               event.image.width.toDouble(),
               event.image.height.toDouble(),
             ),
+            cameraImage: event.image,
           ));
         } else {
           emit(FaceDetectionLowQuality(
