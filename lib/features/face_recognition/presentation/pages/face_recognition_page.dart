@@ -91,28 +91,8 @@ class _FaceRecognitionPageState extends State<FaceRecognitionPage> {
   }
 
   Widget _buildOverlay() {
-    return BlocBuilder<FaceDetectionBloc, FaceDetectionState>(
-      builder: (context, state) {
-        if (state is FaceDetected) {
-          // Check if we're using the front camera
-          final isFrontCamera = _cameraDataSource.currentCamera?.lensDirection ==
-              CameraLensDirection.front;
-
-          return FaceBoundingBoxOverlay(
-            faceRect: Rect.fromLTWH(
-              state.face.bounds.left,
-              state.face.bounds.top,
-              state.face.bounds.width,
-              state.face.bounds.height,
-            ),
-            imageSize: ui.Size(state.imageSize.width, state.imageSize.height),
-            isDetecting: true,
-            isFrontCamera: isFrontCamera,
-          );
-        }
-        return const SizedBox.shrink();
-      },
-    );
+    // Green rectangle overlay disabled - using oval positioning guide instead
+    return const SizedBox.shrink();
   }
 
   Widget _buildTopBar() {
