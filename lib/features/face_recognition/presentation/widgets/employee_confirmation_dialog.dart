@@ -1,0 +1,437 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
+
+import '../../../employee/domain/entities/employee.dart';
+import '../bloc/face_recognition_bloc.dart';
+import '../bloc/face_recognition_event.dart';
+
+/// Dialog that appears after successful face recognition
+/// Allows the user to confirm the identity and select an action
+class EmployeeConfirmationDialog extends StatelessWidget {
+  final Employee employee;
+  final double confidence;
+  final String? capturedPhoto;
+  final EmployeeTimeRecord? currentStatus;
+
+  const EmployeeConfirmationDialog({
+    super.key,
+    required this.employee,
+    required this.confidence,
+    this.capturedPhoto,
+    this.currentStatus,
+  });
+
+  static Future<void> show({
+    required BuildContext context,
+    required Employee employee,
+    required double confidence,
+    String? capturedPhoto,
+    EmployeeTimeRecord? currentStatus,
+  }) {
+    return showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => EmployeeConfirmationDialog(
+        employee: employee,
+        confidence: confidence,
+        capturedPhoto: capturedPhoto,
+        currentStatus: currentStatus,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isClockingIn = currentStatus == null || 
+        currentStatus?.status == 'clocked_out';
+
+    return Dialog(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20.r),
+      ),
+      child: Container(
+        width: 0.9.sw,
+        padding: EdgeInsets.all(20.w),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Close button
+            Align(
+              alignment: Alignment.topRight,
+              child: IconButton(
+                onPressed: () => Navigator.of(context).pop(),
+                icon: Icon(
+                  Icons.close,
+                  size: 24.sp,
+                  color: Colors.grey[600],
+                ),
+              ),
+            ),
+
+            // Employee photo and captured photo side by side
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                // Employee photo
+                Column(
+                  children: [
+                    _ProfileImage(
+                      imageBytes: employee.photoBytes,
+                      imageUrl: employee.photoUrl,
+                      size: 80.w,
+                    ),
+                    SizedBox(height: 8.h),
+                    Text(
+                      'Profile',
+                      style: TextStyle(
+                        fontSize: 12.sp,
+                        color: Colors.grey[600],
+                      ),
+                    ),
+                  ],
+                ),
+                SizedBox(width: 30.w),
+                // Captured photo
+                if (capturedPhoto != null)
+                  Column(
+                    children: [
+                      _ProfileImage(
+                        imageBytes: base64Decode(capturedPhoto!),
+                        size: 80.w,
+                      ),
+                      SizedBox(height: 8.h),
+                      Text(
+                        'Captured',
+                        style: TextStyle(
+                          fontSize: 12.sp,
+                          color: Colors.grey[600],
+                        ),
+                      ),
+                    ],
+                  ),
+              ],
+            ),
+            SizedBox(height: 20.h),
+
+            // Employee info
+            Text(
+              employee.name,
+              style: TextStyle(
+                fontSize: 20.sp,
+                fontWeight: FontWeight.bold,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            SizedBox(height: 4.h),
+            Text(
+              employee.position ?? 'Employee',
+              style: TextStyle(
+                fontSize: 14.sp,
+                color: Colors.grey[600],
+              ),
+            ),
+            if (employee.department != null) ...[  
+              SizedBox(height: 2.h),
+              Text(
+                employee.department!,
+                style: TextStyle(
+                  fontSize: 12.sp,
+                  color: Colors.grey[500],
+                ),
+              ),
+            ],
+            SizedBox(height: 16.h),
+
+            // Confidence indicator
+            _ConfidenceIndicator(confidence: confidence),
+            SizedBox(height: 20.h),
+
+            // Current status
+            if (currentStatus != null)
+              Container(
+                padding: EdgeInsets.symmetric(
+                  horizontal: 16.w,
+                  vertical: 12.h,
+                ),
+                decoration: BoxDecoration(
+                  color: isClockingIn 
+                      ? Colors.orange.withOpacity(0.1)
+                      : Colors.green.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12.r),
+                  border: Border.all(
+                    color: isClockingIn ? Colors.orange : Colors.green,
+                    width: 1.w,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      isClockingIn ? Icons.login : Icons.logout,
+                      size: 20.sp,
+                      color: isClockingIn ? Colors.orange : Colors.green,
+                    ),
+                    SizedBox(width: 8.w),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          isClockingIn ? 'Last Clock Out' : 'Clocked In',
+                          style: TextStyle(
+                            fontSize: 12.sp,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                        Text(
+                          _formatTime(
+                            isClockingIn 
+                                ? currentStatus!.clockOutTime 
+                                : currentStatus!.clockInTime
+                          ),
+                          style: TextStyle(
+                            fontSize: 14.sp,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            SizedBox(height: 20.h),
+
+            // Action buttons
+            Row(
+              children: [
+                // Cancel button
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    style: OutlinedButton.styleFrom(
+                      padding: EdgeInsets.symmetric(vertical: 14.h),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12.r),
+                      ),
+                      side: BorderSide(
+                        color: Colors.grey[400]!,
+                      ),
+                    ),
+                    child: Text(
+                      'Cancel',
+                      style: TextStyle(
+                        fontSize: 16.sp,
+                        color: Colors.grey[700],
+                      ),
+                    ),
+                  ),
+                ),
+                SizedBox(width: 12.w),
+                // Confirm button
+                Expanded(
+                  flex: 2,
+                  child: ElevatedButton(
+                    onPressed: () {
+                      // Dispatch the appropriate event
+                      context.read<FaceRecognitionBloc>().add(
+                        ConfirmRecognition(
+                          employeeId: employee.id,
+                          action: isClockingIn
+                              ? RecognitionAction.clockIn
+                              : RecognitionAction.clockOut,
+                        ),
+                      );
+                      Navigator.of(context).pop();
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: isClockingIn ? Colors.green : Colors.orange,
+                      padding: EdgeInsets.symmetric(vertical: 14.h),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12.r),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          isClockingIn ? Icons.login : Icons.logout,
+                          size: 20.sp,
+                        ),
+                        SizedBox(width: 8.w),
+                        Text(
+                          isClockingIn ? 'Clock In' : 'Clock Out',
+                          style: TextStyle(
+                            fontSize: 16.sp,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+
+            // Wrong person link
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                // Reset the recognition
+                context.read<FaceRecognitionBloc>().add(
+                  const InitializeFaceRecognition(),
+                );
+              },
+              child: Text(
+                'Not ${employee.name.split(' ').first}?',
+                style: TextStyle(
+                  fontSize: 14.sp,
+                  color: theme.primaryColor,
+                  decoration: TextDecoration.underline,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _formatTime(DateTime? time) {
+    if (time == null) return 'N/A';
+    final now = DateTime.now();
+    if (time.day == now.day && 
+        time.month == now.month && 
+        time.year == now.year) {
+      // Today
+      return 'Today ${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+    } else if (time.day == now.day - 1 && 
+               time.month == now.month && 
+               time.year == now.year) {
+      // Yesterday  
+      return 'Yesterday ${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+    } else {
+      // Other days
+      return '${time.day}/${time.month} ${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+    }
+  }
+}
+
+/// Profile image widget with fallback
+class _ProfileImage extends StatelessWidget {
+  final Uint8List? imageBytes;
+  final String? imageUrl;
+  final double size;
+
+  const _ProfileImage({
+    this.imageBytes,
+    this.imageUrl,
+    required this.size,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(
+          color: Colors.grey[300]!,
+          width: 2.w,
+        ),
+      ),
+      child: ClipOval(
+        child: imageBytes != null
+            ? Image.memory(
+                imageBytes!,
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) => _fallbackAvatar(),
+              )
+            : imageUrl != null
+                ? Image.network(
+                    imageUrl!,
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) => _fallbackAvatar(),
+                  )
+                : _fallbackAvatar(),
+      ),
+    );
+  }
+
+  Widget _fallbackAvatar() {
+    return Container(
+      color: Colors.grey[300],
+      child: Icon(
+        Icons.person,
+        size: size * 0.5,
+        color: Colors.grey[600],
+      ),
+    );
+  }
+}
+
+/// Confidence indicator widget
+class _ConfidenceIndicator extends StatelessWidget {
+  final double confidence;
+
+  const _ConfidenceIndicator({required this.confidence});
+
+  @override
+  Widget build(BuildContext context) {
+    final percentage = (confidence * 100).toInt();
+    final color = _getConfidenceColor();
+
+    return Column(
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.verified_user,
+              size: 16.sp,
+              color: color,
+            ),
+            SizedBox(width: 4.w),
+            Text(
+              'Confidence: $percentage%',
+              style: TextStyle(
+                fontSize: 14.sp,
+                fontWeight: FontWeight.w500,
+                color: color,
+              ),
+            ),
+          ],
+        ),
+        SizedBox(height: 8.h),
+        Container(
+          width: 200.w,
+          height: 6.h,
+          decoration: BoxDecoration(
+            color: Colors.grey[300],
+            borderRadius: BorderRadius.circular(3.r),
+          ),
+          child: FractionallySizedBox(
+            alignment: Alignment.centerLeft,
+            widthFactor: confidence.clamp(0.0, 1.0),
+            child: Container(
+              decoration: BoxDecoration(
+                color: color,
+                borderRadius: BorderRadius.circular(3.r),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Color _getConfidenceColor() {
+    if (confidence >= 0.85) return Colors.green;
+    if (confidence >= 0.70) return Colors.orange;
+    return Colors.red;
+  }
+}

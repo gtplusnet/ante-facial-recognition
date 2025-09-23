@@ -1,0 +1,399 @@
+import 'dart:typed_data';
+import 'dart:isolate';
+
+import 'package:camera/camera.dart';
+import 'package:injectable/injectable.dart';
+import 'package:image/image.dart' as img;
+
+import '../../../../core/ml/face_processing_utils.dart';
+import '../../../../core/ml/tflite_service.dart';
+import '../../../../core/utils/logger.dart';
+import '../../../face_detection/data/services/face_detection_service.dart';
+import '../../../face_detection/domain/entities/face_detection_result.dart';
+
+@singleton
+class FaceEncodingService {
+  final TFLiteService _tfliteService;
+  final FaceDetectionService _faceDetectionService;
+
+  // Cache for processed faces
+  final Map<String, FaceEncodingResult> _encodingCache = {};
+  static const int maxCacheSize = 100;
+
+  // Processing state
+  bool _isProcessing = false;
+  Isolate? _processingIsolate;
+  ReceivePort? _receivePort;
+
+  FaceEncodingService({
+    required TFLiteService tfliteService,
+    required FaceDetectionService faceDetectionService,
+  })  : _tfliteService = tfliteService,
+        _faceDetectionService = faceDetectionService;
+
+  /// Initialize the service
+  Future<void> initialize() async {
+    try {
+      Logger.info('Initializing face encoding service');
+
+      // Initialize TFLite if not already done
+      if (!_tfliteService.isInitialized) {
+        await _tfliteService.initialize();
+      }
+
+      // Setup isolate for background processing
+      await _setupProcessingIsolate();
+
+      Logger.success('Face encoding service initialized');
+    } catch (e) {
+      Logger.error('Failed to initialize face encoding service', error: e);
+      throw Exception('Face encoding initialization failed: $e');
+    }
+  }
+
+  /// Setup isolate for background processing
+  Future<void> _setupProcessingIsolate() async {
+    try {
+      _receivePort = ReceivePort();
+      _processingIsolate = await Isolate.spawn(
+        _isolateEntryPoint,
+        _receivePort!.sendPort,
+      );
+      Logger.success('Processing isolate created');
+    } catch (e) {
+      Logger.warning('Failed to create processing isolate: $e');
+      // Continue without isolate - will process on main thread
+    }
+  }
+
+  /// Isolate entry point for background processing
+  static void _isolateEntryPoint(SendPort sendPort) {
+    final receivePort = ReceivePort();
+    sendPort.send(receivePort.sendPort);
+
+    receivePort.listen((message) async {
+      if (message is Map<String, dynamic>) {
+        try {
+          final imageBytes = message['imageBytes'] as Uint8List;
+          final interpreterAddress = message['interpreterAddress'] as int;
+
+          // Process in isolate
+          final embedding = await TFLiteService.extractEmbeddingInIsolate(
+            sendPort,
+            imageBytes,
+            interpreterAddress,
+          );
+
+          sendPort.send({'success': true, 'embedding': embedding});
+        } catch (e) {
+          sendPort.send({'success': false, 'error': e.toString()});
+        }
+      }
+    });
+  }
+
+  /// Extract face encoding from camera image
+  Future<FaceEncodingResult?> extractFromCameraImage(
+    CameraImage cameraImage,
+    CameraDescription cameraDescription,
+  ) async {
+    if (_isProcessing) {
+      Logger.warning('Already processing a face');
+      return null;
+    }
+
+    _isProcessing = true;
+    try {
+      final startTime = DateTime.now();
+
+      // Detect faces in the image
+      final faces = await _faceDetectionService.detectFacesFromCameraImage(
+        cameraImage,
+        cameraDescription,
+      );
+
+      if (faces.isEmpty) {
+        Logger.debug('No faces detected in camera image');
+        return null;
+      }
+
+      // Use the first face (best quality)
+      final face = _selectBestFace(faces);
+      if (face == null) {
+        Logger.warning('No suitable face found for encoding');
+        return null;
+      }
+
+      // Convert camera image to processable format
+      final image = FaceProcessingUtils.convertCameraImage(cameraImage);
+      if (image == null) {
+        Logger.error('Failed to convert camera image');
+        return null;
+      }
+
+      // Crop and process the face
+      final processedFace = await _processFaceImage(image, face);
+      if (processedFace == null) {
+        Logger.error('Failed to process face image');
+        return null;
+      }
+
+      // Extract embedding
+      final embedding = await _extractEmbedding(processedFace);
+      if (embedding == null) {
+        Logger.error('Failed to extract face embedding');
+        return null;
+      }
+
+      final processingTime = DateTime.now().difference(startTime);
+      Logger.performance(
+        'Face encoding extracted',
+        duration: processingTime,
+      );
+
+      return FaceEncodingResult(
+        embedding: embedding,
+        face: face,
+        quality: FaceProcessingUtils.calculateFaceQuality(face, processedFace),
+        processingTime: processingTime,
+      );
+    } catch (e) {
+      Logger.error('Face encoding extraction failed', error: e);
+      return null;
+    } finally {
+      _isProcessing = false;
+    }
+  }
+
+  /// Extract face encoding from image bytes
+  Future<FaceEncodingResult?> extractFromImageBytes(
+    Uint8List imageBytes,
+  ) async {
+    try {
+      // Decode image
+      final image = img.decodeImage(imageBytes);
+      if (image == null) {
+        Logger.error('Failed to decode image bytes');
+        return null;
+      }
+
+      // Detect faces using ML Kit
+      final faces = await _faceDetectionService.detectFacesFromBytes(
+        imageBytes,
+        width: image.width,
+        height: image.height,
+      );
+
+      if (faces.isEmpty) {
+        Logger.debug('No faces detected in image');
+        return null;
+      }
+
+      // Process the best face
+      final face = _selectBestFace(faces);
+      if (face == null) {
+        return null;
+      }
+
+      // Process face image
+      final processedFace = await _processFaceImage(image, face);
+      if (processedFace == null) {
+        return null;
+      }
+
+      // Extract embedding
+      final embedding = await _extractEmbedding(processedFace);
+      if (embedding == null) {
+        return null;
+      }
+
+      return FaceEncodingResult(
+        embedding: embedding,
+        face: face,
+        quality: FaceProcessingUtils.calculateFaceQuality(face, processedFace),
+        processingTime: Duration.zero,
+      );
+    } catch (e) {
+      Logger.error('Failed to extract encoding from image bytes', error: e);
+      return null;
+    }
+  }
+
+  /// Select the best face from multiple detections
+  FaceDetectionResult? _selectBestFace(List<FaceDetectionResult> faces) {
+    if (faces.isEmpty) return null;
+
+    // Sort by quality score and select the best
+    final sortedFaces = List<FaceDetectionResult>.from(faces)
+      ..sort((a, b) => b.qualityScore.compareTo(a.qualityScore));
+
+    for (final face in sortedFaces) {
+      // Check if face is frontal and has good quality
+      if (FaceProcessingUtils.isFaceFrontal(face) && face.isGoodQuality) {
+        return face;
+      }
+    }
+
+    // If no ideal face, return the best available
+    return sortedFaces.first;
+  }
+
+  /// Process face image (crop, align, normalize)
+  Future<img.Image?> _processFaceImage(
+    img.Image fullImage,
+    FaceDetectionResult face,
+  ) async {
+    try {
+      // Crop face from full image
+      var faceImage = FaceProcessingUtils.cropFace(fullImage, face);
+      if (faceImage == null) {
+        return null;
+      }
+
+      // Align face if landmarks are available
+      faceImage = FaceProcessingUtils.alignFace(faceImage, face) ?? faceImage;
+
+      // Check lighting conditions
+      if (!FaceProcessingUtils.isLightingAcceptable(faceImage)) {
+        Logger.warning('Poor lighting conditions detected');
+      }
+
+      return faceImage;
+    } catch (e) {
+      Logger.error('Failed to process face image', error: e);
+      return null;
+    }
+  }
+
+  /// Extract embedding from processed face image
+  Future<Float32List?> _extractEmbedding(img.Image faceImage) async {
+    try {
+      // Convert image to bytes
+      final imageBytes = FaceProcessingUtils.imageToBytes(faceImage);
+
+      // Extract embedding using TFLite service
+      final embedding = await _tfliteService.extractEmbedding(imageBytes);
+
+      return embedding;
+    } catch (e) {
+      Logger.error('Failed to extract embedding', error: e);
+      return null;
+    }
+  }
+
+  /// Compare two face encodings
+  SimpleFaceMatchResult compareFaces(
+    Float32List embedding1,
+    Float32List embedding2, {
+    double threshold = 0.6,
+  }) {
+    final distance = _tfliteService.calculateDistance(embedding1, embedding2);
+    final similarity = _tfliteService.calculateCosineSimilarity(embedding1, embedding2);
+    final confidence = _tfliteService.getMatchConfidence(embedding1, embedding2);
+    final isMatch = distance < threshold;
+
+    return SimpleFaceMatchResult(
+      isMatch: isMatch,
+      distance: distance,
+      similarity: similarity,
+      confidence: confidence,
+      threshold: threshold,
+    );
+  }
+
+  /// Find best match from a list of known embeddings
+  SimpleFaceMatchResult? findBestMatch(
+    Float32List queryEmbedding,
+    Map<String, Float32List> knownEmbeddings, {
+    double threshold = 0.6,
+  }) {
+    if (knownEmbeddings.isEmpty) return null;
+
+    String? bestMatchId;
+    double bestDistance = double.infinity;
+    double bestSimilarity = 0;
+    double bestConfidence = 0;
+
+    for (final entry in knownEmbeddings.entries) {
+      final result = compareFaces(queryEmbedding, entry.value, threshold: threshold);
+
+      if (result.distance < bestDistance) {
+        bestDistance = result.distance;
+        bestSimilarity = result.similarity;
+        bestConfidence = result.confidence;
+        bestMatchId = entry.key;
+      }
+    }
+
+    if (bestMatchId == null || bestDistance >= threshold) {
+      return null;
+    }
+
+    return SimpleFaceMatchResult(
+      isMatch: true,
+      distance: bestDistance,
+      similarity: bestSimilarity,
+      confidence: bestConfidence,
+      threshold: threshold,
+      matchedId: bestMatchId,
+    );
+  }
+
+  /// Clear encoding cache
+  void clearCache() {
+    _encodingCache.clear();
+    Logger.debug('Face encoding cache cleared');
+  }
+
+  /// Dispose resources
+  Future<void> dispose() async {
+    try {
+      _processingIsolate?.kill(priority: Isolate.immediate);
+      _receivePort?.close();
+      clearCache();
+      await _tfliteService.dispose();
+      await _faceDetectionService.dispose();
+      Logger.info('Face encoding service disposed');
+    } catch (e) {
+      Logger.error('Error disposing face encoding service', error: e);
+    }
+  }
+}
+
+/// Result of face encoding extraction
+class FaceEncodingResult {
+  final Float32List embedding;
+  final FaceDetectionResult face;
+  final double quality;
+  final Duration processingTime;
+
+  FaceEncodingResult({
+    required this.embedding,
+    required this.face,
+    required this.quality,
+    required this.processingTime,
+  });
+}
+
+/// Result of simple face matching
+class SimpleFaceMatchResult {
+  final bool isMatch;
+  final double distance;
+  final double similarity;
+  final double confidence;
+  final double threshold;
+  final String? matchedId;
+
+  SimpleFaceMatchResult({
+    required this.isMatch,
+    required this.distance,
+    required this.similarity,
+    required this.confidence,
+    required this.threshold,
+    this.matchedId,
+  });
+
+  bool get isHighConfidence => confidence > 0.8;
+  bool get isMediumConfidence => confidence > 0.6 && confidence <= 0.8;
+  bool get isLowConfidence => confidence <= 0.6;
+}

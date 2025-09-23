@@ -1,5 +1,13 @@
 # ANTE Facial Recognition - Claude Quick Reference
 
+## CRITICAL: Session Start Protocol
+1. ALWAYS read PLANNING.md first - Contains vision, architecture, and technology stack
+2. Check TASK.md - Review current tasks before starting work.
+3. Mark tasks immediately - Update TASK.md as soon as tasks are completed
+4. Add discovered tasks - Document new requirements found during development
+5. Update PLANNING.md continuously - Improve and refine the plan as you encounter new issues, realize better approaches, or discover requirements during development
+6. Always use SOLID principle when developing.
+
 ## 🎯 Quick Context
 Android face recognition app for employee time tracking using Flutter. All processing on-device for privacy and speed.
 
