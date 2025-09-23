@@ -137,6 +137,26 @@ Workmanager().registerOneOffTask(
 
 ## 🐛 Troubleshooting Guide
 
+### Face Detection Rectangle Misalignment
+```dart
+// Front camera needs coordinate transformation
+// ML Kit returns landscape coords, display is portrait
+// Solution: Swap X/Y and mirror for front camera
+transformedRect = Rect.fromLTRB(
+  size.width - (faceRect!.bottom * scaleX),  // Mirror & swap
+  faceRect!.left * scaleY,                   // Swap coords
+  size.width - (faceRect!.top * scaleX),     // Mirror & swap
+  faceRect!.right * scaleY,                  // Swap coords
+);
+```
+
+### Missing Overlays on Active Screen
+```dart
+// Check which page is actually being used in router
+// FaceRecognitionPage vs CameraRecognitionScreen
+// Ensure overlays are added to the ACTIVE page
+```
+
 ### Camera Not Working
 ```bash
 # Check permissions
