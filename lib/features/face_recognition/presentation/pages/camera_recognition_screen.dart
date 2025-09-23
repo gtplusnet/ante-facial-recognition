@@ -12,6 +12,7 @@ import '../bloc/face_recognition_bloc.dart';
 import '../bloc/face_recognition_event.dart';
 import '../bloc/face_recognition_state.dart';
 import '../widgets/employee_confirmation_dialog.dart';
+import '../widgets/face_positioning_overlay.dart';
 import '../widgets/recognition_feedback_overlay.dart';
 
 /// Main camera screen for face recognition
@@ -39,6 +40,7 @@ class _CameraRecognitionScreenState extends State<CameraRecognitionScreen>
   Rect? _currentFaceBounds;
   double? _currentFaceQuality;
   DateTime? _lastProcessTime;
+  Size? _currentImageSize;
   static const _processingInterval = Duration(milliseconds: 500);
 
   @override
@@ -157,13 +159,16 @@ class _CameraRecognitionScreenState extends State<CameraRecognitionScreen>
 
   Future<void> _processCameraImage(CameraImage image) async {
     try {
+      // Store the image dimensions
+      _currentImageSize = Size(image.width.toDouble(), image.height.toDouble());
+
       // Convert CameraImage to InputImage for ML Kit
       final inputImage = _convertCameraImage(image);
       if (inputImage == null) return;
 
       // Detect faces
       final faces = await _faceDetector.processImage(inputImage);
-      
+
       if (faces.isEmpty) {
         if (mounted) {
           setState(() {
@@ -182,6 +187,9 @@ class _CameraRecognitionScreenState extends State<CameraRecognitionScreen>
       // Calculate face quality
       final quality = _calculateFaceQuality(face, image);
 
+      // Check if face is in the target area
+      final isInTargetArea = _isFaceInTargetArea(face, image);
+
       if (mounted) {
         setState(() {
           _currentFaceBounds = face.boundingBox;
@@ -189,8 +197,8 @@ class _CameraRecognitionScreenState extends State<CameraRecognitionScreen>
         });
       }
 
-      // Only process for recognition if quality is good
-      if (quality > 0.6) {
+      // Only process for recognition if quality is good AND face is in target area
+      if (quality > 0.6 && isInTargetArea) {
         final state = context.read<FaceRecognitionBloc>().state;
         
         // Only process if we're in a ready state (not already processing)
@@ -292,6 +300,41 @@ class _CameraRecognitionScreenState extends State<CameraRecognitionScreen>
     return (sizeScore * 0.4 + centerScore * 0.3 + angleScore * 0.3).clamp(0.0, 1.0);
   }
 
+  bool _isFaceInTargetArea(Face face, CameraImage image) {
+    // Define target area (center-upper portion of screen)
+    // This should match the overlay target area
+    final targetCenterX = image.width / 2;
+    final targetCenterY = image.height * 0.35; // Upper portion
+    final targetWidth = image.width * 0.35;
+    final targetHeight = targetWidth * 1.3;
+
+    // Get face center - need to account for mirroring
+    var faceCenterX = face.boundingBox.center.dx;
+    final faceCenterY = face.boundingBox.center.dy;
+
+    // If using front camera (mirrored), flip the X coordinate
+    final isFrontCamera = _cameraController?.description.lensDirection ==
+        CameraLensDirection.front;
+    if (isFrontCamera) {
+      faceCenterX = image.width - faceCenterX;
+    }
+
+    // Check if face center is within target bounds (with some tolerance)
+    final toleranceX = targetWidth * 0.3;
+    final toleranceY = targetHeight * 0.3;
+
+    final isInX = (faceCenterX - targetCenterX).abs() < toleranceX;
+    final isInY = (faceCenterY - targetCenterY).abs() < toleranceY;
+
+    // Check if face size is appropriate
+    final faceWidth = face.boundingBox.width;
+    final faceHeight = face.boundingBox.height;
+    final sizeRatio = faceWidth / targetWidth;
+    final isSizeOk = sizeRatio > 0.6 && sizeRatio < 1.4;
+
+    return isInX && isInY && isSizeOk;
+  }
+
   void _showError(String message) {
     if (!mounted) return;
     
@@ -358,11 +401,13 @@ class _CameraRecognitionScreenState extends State<CameraRecognitionScreen>
                 ),
               ),
 
-            // Recognition feedback overlay
-            RecognitionFeedbackOverlay(
-              faceBoundingBox: _currentFaceBounds,
-              faceQuality: _currentFaceQuality,
-            ),
+            // Face positioning overlay with target guide
+            if (_cameraController != null &&
+                _cameraController!.value.isInitialized)
+              FacePositioningOverlay(
+                isFaceDetected: _currentFaceBounds != null,
+                isGoodQuality: (_currentFaceQuality ?? 0) > 0.6,
+              ),
 
             // Top bar with back button and settings
             Positioned(
