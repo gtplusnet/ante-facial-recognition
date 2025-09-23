@@ -19,6 +19,13 @@ class FaceDetectionBloc extends Bloc<FaceDetectionEvent, FaceDetectionState> {
   StreamSubscription? _cameraStreamSubscription;
   bool _isProcessing = false;
 
+  // Store latest camera image temporarily to pass through events (not state)
+  camera.CameraImage? _latestCameraImage;
+
+  /// Get the latest camera image for face recognition processing
+  /// This avoids storing mutable camera images in immutable state objects
+  camera.CameraImage? get latestCameraImage => _latestCameraImage;
+
   FaceDetectionBloc({
     required FaceDetectionService faceDetectionService,
     required CameraDataSource cameraDataSource,
@@ -85,6 +92,9 @@ class FaceDetectionBloc extends Bloc<FaceDetectionEvent, FaceDetectionState> {
         return;
       }
 
+      // Store latest camera image for potential use in face recognition
+      _latestCameraImage = event.image;
+
       final faces = await _faceDetectionService.detectFacesFromCameraImage(
         event.image,
         currentCamera,
@@ -101,7 +111,6 @@ class FaceDetectionBloc extends Bloc<FaceDetectionEvent, FaceDetectionState> {
               event.image.width.toDouble(),
               event.image.height.toDouble(),
             ),
-            cameraImage: event.image,
           ));
         } else {
           emit(FaceDetectionLowQuality(

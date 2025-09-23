@@ -1,5 +1,7 @@
 import 'package:equatable/equatable.dart';
 
+import '../../../../core/config/face_quality_config.dart';
+
 class FaceDetectionResult extends Equatable {
   final String? id;
   final FaceBounds bounds;
@@ -34,33 +36,29 @@ class FaceDetectionResult extends Equatable {
   double get qualityScore {
     double score = 1.0;
 
-    // Very lenient quality scoring - allow almost any face angle
-    // Allow angles up to 90 degrees with minimal penalty
+    // Apply angle-based scoring using configuration
     if (rotationX != null) {
-      final xScore = 1.0 - (rotationX!.abs() / 90.0).clamp(0.0, 1.0);
-      score *= (xScore * 0.5 + 0.5); // Minimum score of 0.5 even at max angle
+      score *= FaceQualityConfig.calculateAngleScoreFactor(rotationX!);
     }
     if (rotationY != null) {
-      final yScore = 1.0 - (rotationY!.abs() / 90.0).clamp(0.0, 1.0);
-      score *= (yScore * 0.5 + 0.5); // Minimum score of 0.5 even at max angle
+      score *= FaceQualityConfig.calculateAngleScoreFactor(rotationY!);
     }
     if (rotationZ != null) {
-      final zScore = 1.0 - (rotationZ!.abs() / 90.0).clamp(0.0, 1.0);
-      score *= (zScore * 0.5 + 0.5); // Minimum score of 0.5 even at max angle
+      score *= FaceQualityConfig.calculateAngleScoreFactor(rotationZ!);
     }
 
-    // Eyes open check is optional - minimal penalty
-    if (leftEyeOpenProbability != null && leftEyeOpenProbability! < 0.2) {
-      score *= 0.9; // Very minimal penalty for closed eyes
+    // Apply eye closed penalties using configuration
+    if (FaceQualityConfig.isEyeClosed(leftEyeOpenProbability)) {
+      score = FaceQualityConfig.applyEyeClosedPenalty(score);
     }
-    if (rightEyeOpenProbability != null && rightEyeOpenProbability! < 0.2) {
-      score *= 0.9; // Very minimal penalty for closed eyes
+    if (FaceQualityConfig.isEyeClosed(rightEyeOpenProbability)) {
+      score = FaceQualityConfig.applyEyeClosedPenalty(score);
     }
 
     return score;
   }
 
-  bool get isGoodQuality => qualityScore >= 0.3;
+  bool get isGoodQuality => qualityScore >= FaceQualityConfig.minQualityThreshold;
 
   @override
   List<Object?> get props => [

@@ -1,5 +1,4 @@
 import 'package:equatable/equatable.dart';
-import 'package:camera/camera.dart' as camera;
 
 import '../../domain/entities/face_detection_result.dart';
 
@@ -25,16 +24,14 @@ class FaceDetectionReady extends FaceDetectionState {
 class FaceDetected extends FaceDetectionState {
   final FaceDetectionResult face;
   final ImageSize imageSize;
-  final camera.CameraImage cameraImage;
 
   const FaceDetected({
     required this.face,
     required this.imageSize,
-    required this.cameraImage,
   });
 
   @override
-  List<Object> get props => [face, imageSize, cameraImage];
+  List<Object> get props => [face, imageSize];
 }
 
 class FaceDetectionNoFace extends FaceDetectionState {

@@ -8,7 +8,12 @@ import 'package:injectable/injectable.dart';
 import 'package:tflite_flutter/tflite_flutter.dart';
 import 'package:image/image.dart' as img;
 
+import '../config/face_quality_config.dart';
+import '../error/error_handler.dart';
 import '../utils/logger.dart';
+import 'embedding_strategy.dart';
+import 'mock_embedding_strategy.dart';
+import 'tflite_embedding_strategy.dart';
 
 @singleton
 class TFLiteService {
@@ -17,9 +22,13 @@ class TFLiteService {
   static const int outputSize = 128;
   static const int numThreads = 4;
 
+  // Strategy pattern implementation
+  late EmbeddingStrategy _embeddingStrategy;
+  bool _isInitialized = false;
+
+  // Legacy fields (kept for backward compatibility during migration)
   Interpreter? _interpreter;
   IsolateInterpreter? _isolateInterpreter;
-  bool _isInitialized = false;
 
   // Model input/output shapes
   late List<int> _inputShape;
@@ -36,9 +45,45 @@ class TFLiteService {
       return;
     }
 
-    try {
-      Logger.info('Initializing TFLite service...');
+    await ErrorHandler.handleAsyncOperation(
+      'initialize TFLite service',
+      () async {
+        Logger.info('Initializing TFLite service...');
 
+        // Try to initialize TFLite strategy first
+        bool tfliteSuccess = false;
+        await ErrorHandler.handleOptionalOperationWithWarning(
+          'initialize TFLite strategy',
+          () async {
+            _embeddingStrategy = TFLiteEmbeddingStrategy();
+            await _embeddingStrategy.initialize();
+            tfliteSuccess = true;
+            Logger.success('Using TFLite embedding strategy');
+          },
+          warningMessage: 'TFLite strategy failed, falling back to mock',
+        );
+
+        // If TFLite strategy failed, use mock strategy
+        if (!tfliteSuccess) {
+          _embeddingStrategy = MockEmbeddingStrategy();
+          await _embeddingStrategy.initialize();
+          Logger.info('Using mock embedding strategy for testing');
+        }
+
+        // Initialize legacy components for backward compatibility
+        await _initializeLegacyComponents();
+
+        _isInitialized = true;
+        Logger.success('TFLite service initialized with ${_embeddingStrategy.strategyName}');
+      },
+      shouldRethrow: true,
+      customErrorMessage: 'Failed to initialize face recognition model',
+    );
+  }
+
+  /// Initialize legacy components for backward compatibility
+  Future<void> _initializeLegacyComponents() async {
+    try {
       // Load model from assets
       final modelBytes = await _loadModelFromAssets();
 
@@ -52,11 +97,6 @@ class TFLiteService {
           final gpuDelegateV2 = GpuDelegateV2(
             options: GpuDelegateOptionsV2(
               isPrecisionLossAllowed: false,
-              // TODO: Update GPU inference options when API is fixed
-              // inferencePreference: TfLiteGpuInferenceUsage.sustainedSpeed,
-              // inferencePriority1: TfLiteGpuInferencePriority.minLatency,
-              // inferencePriority2: TfLiteGpuInferencePriority.auto,
-              // inferencePriority3: TfLiteGpuInferencePriority.auto,
             ),
           );
           options.addDelegate(gpuDelegateV2);
@@ -76,27 +116,22 @@ class TFLiteService {
         _inputType = _interpreter!.getInputTensor(0).type;
         _outputType = _interpreter!.getOutputTensor(0).type;
 
-        Logger.info('Model loaded successfully');
+        Logger.debug('Legacy interpreter initialized');
         Logger.debug('Input shape: $_inputShape, type: $_inputType');
         Logger.debug('Output shape: $_outputShape, type: $_outputType');
 
         // Create isolate interpreter for background processing
         await _initializeIsolateInterpreter();
       } catch (modelError) {
-        Logger.warning('Failed to load TFLite model, using mock mode: $modelError');
+        Logger.warning('Legacy interpreter failed: $modelError');
         // Set up mock values for testing
         _inputShape = [1, inputSize, inputSize, 3];
         _outputShape = [1, outputSize];
         _inputType = TensorType.float32;
         _outputType = TensorType.float32;
-        Logger.info('Running in mock mode for testing');
       }
-
-      _isInitialized = true;
-      Logger.success('TFLite service initialized');
     } catch (e) {
-      Logger.error('Failed to initialize TFLite service', error: e);
-      throw Exception('Failed to initialize face recognition model: $e');
+      Logger.warning('Legacy components initialization failed: $e');
     }
   }
 
@@ -131,40 +166,53 @@ class TFLiteService {
     }
 
     try {
-      // Check if we have a real interpreter or are in mock mode
-      if (_interpreter == null) {
-        // Mock mode - generate random but consistent embedding for testing
-        Logger.debug('Generating mock embedding for testing');
+      // Use strategy pattern for embedding extraction
+      return await _embeddingStrategy.extractEmbedding(imageBytes);
+    } catch (e) {
+      Logger.error('Failed to extract embedding with strategy', error: e);
+
+      // Fallback to legacy method for backward compatibility
+      try {
+        return await _extractEmbeddingLegacy(imageBytes);
+      } catch (legacyError) {
+        Logger.error('Legacy fallback also failed', error: legacyError);
+        // Final fallback to mock embedding
         return _generateMockEmbedding(imageBytes);
       }
+    }
+  }
 
-      // Decode and preprocess image
-      final input = _preprocessImage(imageBytes);
-
-      // Prepare output buffer
-      final output = List.filled(outputSize, 0.0)
-          .reshape([1, outputSize]);
-
-      // Run inference
-      if (_isolateInterpreter != null) {
-        // Use isolate for background processing
-        await _isolateInterpreter!.run(input, output);
-      } else {
-        // Fallback to main thread
-        _interpreter!.run(input, output);
-      }
-
-      // Convert to Float32List and normalize
-      final embedding = Float32List.fromList(
-        (output as List<List<double>>)[0].cast<double>(),
-      );
-
-      return _normalizeEmbedding(embedding);
-    } catch (e) {
-      Logger.error('Failed to extract embedding', error: e);
-      // Fallback to mock embedding
+  /// Legacy embedding extraction method for backward compatibility
+  Future<Float32List> _extractEmbeddingLegacy(Uint8List imageBytes) async {
+    // Check if we have a real interpreter or are in mock mode
+    if (_interpreter == null) {
+      // Mock mode - generate random but consistent embedding for testing
+      Logger.debug('Generating mock embedding for testing');
       return _generateMockEmbedding(imageBytes);
     }
+
+    // Decode and preprocess image
+    final input = _preprocessImage(imageBytes);
+
+    // Prepare output buffer
+    final output = List.filled(outputSize, 0.0)
+        .reshape([1, outputSize]);
+
+    // Run inference
+    if (_isolateInterpreter != null) {
+      // Use isolate for background processing
+      await _isolateInterpreter!.run(input, output);
+    } else {
+      // Fallback to main thread
+      _interpreter!.run(input, output);
+    }
+
+    // Convert to Float32List and normalize
+    final embedding = Float32List.fromList(
+      (output as List<List<double>>)[0].cast<double>(),
+    );
+
+    return _normalizeEmbedding(embedding);
   }
 
   /// Generate a mock embedding for testing
@@ -175,13 +223,15 @@ class TFLiteService {
 
     // Use image bytes to generate pseudo-random but consistent values
     int seed = 0;
-    for (int i = 0; i < imageBytes.length.clamp(0, 100); i++) {
-      seed = (seed + imageBytes[i]) % 256;
+    final sampleSize = imageBytes.length.clamp(0, FaceQualityConfig.embeddingSeedSampleSize);
+    for (int i = 0; i < sampleSize; i++) {
+      seed = (seed + imageBytes[i]) % FaceQualityConfig.embeddingSeedModulo;
     }
 
-    // Generate normalized values
+    // Generate normalized values using configuration constants
     for (int i = 0; i < outputSize; i++) {
-      embedding[i] = ((seed + i * 7) % 256) / 255.0 - 0.5;
+      final rawValue = (seed + i * FaceQualityConfig.embeddingValueMultiplier) % FaceQualityConfig.embeddingSeedModulo;
+      embedding[i] = (rawValue / (FaceQualityConfig.embeddingSeedModulo - 1)) - 0.5;
     }
 
     return _normalizeEmbedding(embedding);
@@ -347,14 +397,22 @@ class TFLiteService {
 
   /// Dispose resources
   Future<void> dispose() async {
-    try {
-      _isolateInterpreter?.close();
-      _interpreter?.close();
-      _isInitialized = false;
-      Logger.info('TFLite service disposed');
-    } catch (e) {
-      Logger.error('Error disposing TFLite service', error: e);
-    }
+    await ErrorHandler.handleOptionalOperationWithWarning(
+      'dispose TFLite service',
+      () async {
+        // Dispose strategy
+        if (_isInitialized) {
+          _embeddingStrategy.dispose();
+        }
+
+        // Dispose legacy components
+        _isolateInterpreter?.close();
+        _interpreter?.close();
+
+        _isInitialized = false;
+        Logger.info('TFLite service disposed');
+      },
+    );
   }
 }
 

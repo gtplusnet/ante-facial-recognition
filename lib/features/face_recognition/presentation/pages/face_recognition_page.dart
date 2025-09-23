@@ -155,9 +155,12 @@ class _FaceRecognitionPageState extends State<FaceRecognitionPage> {
       final timeSinceLastProcess = now.difference(_lastProcessedTime);
       final qualityPercent = (state.face.qualityScore * 100).toStringAsFixed(0);
 
-      // Store the camera image from the face detection event
-      _latestCameraImage = state.cameraImage;
-      Logger.success('📸 Camera image stored from face detection (size: ${state.cameraImage.width}x${state.cameraImage.height})');
+      // Get the camera image from the face detection bloc
+      final cameraImage = _faceDetectionBloc.latestCameraImage;
+      if (cameraImage != null) {
+        _latestCameraImage = cameraImage;
+        Logger.success('📸 Camera image retrieved from face detection bloc (size: ${cameraImage.width}x${cameraImage.height})');
+      }
 
       // Log all face detections with quality for debugging
       Logger.debug('Face detected with quality: ${qualityPercent}%');
