@@ -1,8 +1,10 @@
 import 'package:dio/dio.dart';
 import 'package:dio_smart_retry/dio_smart_retry.dart';
+import 'package:get_it/get_it.dart';
 import 'package:pretty_dio_logger/pretty_dio_logger.dart';
 
 import '../constants/app_constants.dart';
+import '../storage/secure_storage_helper.dart';
 import '../utils/logger.dart';
 
 class DioFactory {
@@ -49,17 +51,80 @@ class DioFactory {
 }
 
 class _AuthInterceptor extends Interceptor {
+  static String? _cachedApiKey;
+  static DateTime? _cacheTime;
+  static const _cacheExpiry = Duration(minutes: 10);
+
   @override
-  void onRequest(
+  Future<void> onRequest(
     RequestOptions options,
     RequestInterceptorHandler handler,
-  ) {
-    // Will be implemented when we have API key storage
-    // final apiKey = getIt<SecureStorageHelper>().getApiKey();
-    // if (apiKey != null) {
-    //   options.headers[AppConstants.apiKeyHeader] = apiKey;
-    // }
+  ) async {
+    try {
+      // Check if we have a valid cached API key
+      final now = DateTime.now();
+      if (_cachedApiKey != null &&
+          _cacheTime != null &&
+          now.difference(_cacheTime!) < _cacheExpiry) {
+        // Use cached API key
+        options.headers[AppConstants.apiKeyHeader] = _cachedApiKey!;
+        Logger.debug('[AUTH] Using cached API key for request: ${options.uri}');
+        handler.next(options);
+        return;
+      }
+
+      // Cache is empty or expired, fetch from secure storage
+      final secureStorage = GetIt.instance<SecureStorageHelper>();
+      final apiKey = await secureStorage.getApiKey();
+
+      if (apiKey != null && apiKey.isNotEmpty) {
+        // Cache the API key
+        _cachedApiKey = apiKey;
+        _cacheTime = now;
+
+        options.headers[AppConstants.apiKeyHeader] = apiKey;
+        Logger.debug('[AUTH] API Key fetched and cached for request: ${options.uri}');
+      } else {
+        Logger.warning('[AUTH] No API key found for request: ${options.uri}');
+        // Clear any existing cache if API key is not available
+        _cachedApiKey = null;
+        _cacheTime = null;
+
+        // Fail fast for unauthenticated requests
+        handler.reject(
+          DioException(
+            requestOptions: options,
+            error: 'Authentication required: No API key available',
+            type: DioExceptionType.cancel,
+          ),
+        );
+        return;
+      }
+    } catch (e) {
+      Logger.error('[AUTH] Failed to get API key: $e');
+      // Clear cache on error
+      _cachedApiKey = null;
+      _cacheTime = null;
+
+      // Fail fast on authentication errors
+      handler.reject(
+        DioException(
+          requestOptions: options,
+          error: 'Authentication failed: ${e.toString()}',
+          type: DioExceptionType.cancel,
+        ),
+      );
+      return;
+    }
+
     handler.next(options);
+  }
+
+  /// Clear the cached API key (useful for logout or key refresh)
+  static void clearCache() {
+    _cachedApiKey = null;
+    _cacheTime = null;
+    Logger.info('[AUTH] API key cache cleared');
   }
 }
 

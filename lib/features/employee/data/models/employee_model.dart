@@ -1,6 +1,8 @@
 import 'dart:typed_data';
 
 import '../../domain/entities/employee.dart';
+import '../mappers/employee_database_mapper.dart';
+import '../mappers/employee_json_mapper.dart';
 
 class EmployeeModel extends Employee {
   const EmployeeModel({
@@ -21,55 +23,27 @@ class EmployeeModel extends Employee {
     super.metadata,
   });
 
+  /// Factory constructor to create EmployeeModel from JSON
   factory EmployeeModel.fromJson(Map<String, dynamic> json) {
-    return EmployeeModel(
-      id: json['id'] ?? json['_id'] ?? '',
-      name: json['name'] ?? '',
-      email: json['email'],
-      phoneNumber: json['phoneNumber'] ?? json['phone_number'],
-      department: json['department'],
-      position: json['position'],
-      employeeCode: json['employeeCode'] ?? json['employee_code'],
-      photoUrl: json['photoUrl'] ?? json['photo_url'] ?? json['photo'],
-      photoBytes: json['photoBytes'] != null
-          ? Uint8List.fromList(List<int>.from(json['photoBytes']))
-          : null,
-      faceEncodings: (json['faceEncodings'] as List<dynamic>?)
-              ?.map((e) => FaceEncodingModel.fromJson(e))
-              .toList() ??
-          [],
-      lastSyncedAt: json['lastSyncedAt'] != null
-          ? DateTime.parse(json['lastSyncedAt'])
-          : null,
-      createdAt:
-          json['createdAt'] != null ? DateTime.parse(json['createdAt']) : null,
-      updatedAt:
-          json['updatedAt'] != null ? DateTime.parse(json['updatedAt']) : null,
-      isActive: json['isActive'] ?? json['is_active'] ?? true,
-      metadata: json['metadata'],
-    );
+    return EmployeeJsonMapper.fromJson(json);
   }
 
+  /// Convert EmployeeModel to JSON
   Map<String, dynamic> toJson() {
-    return {
-      'id': id,
-      'name': name,
-      'email': email,
-      'phoneNumber': phoneNumber,
-      'department': department,
-      'position': position,
-      'employeeCode': employeeCode,
-      'photoUrl': photoUrl,
-      if (photoBytes != null) 'photoBytes': photoBytes!.toList(),
-      'faceEncodings': faceEncodings.map((e) => (e as FaceEncodingModel).toJson()).toList(),
-      'lastSyncedAt': lastSyncedAt?.toIso8601String(),
-      'createdAt': createdAt?.toIso8601String(),
-      'updatedAt': updatedAt?.toIso8601String(),
-      'isActive': isActive,
-      'metadata': metadata,
-    };
+    return EmployeeJsonMapper.toJson(this);
   }
 
+  /// Factory constructor to create EmployeeModel from database map
+  factory EmployeeModel.fromDatabase(Map<String, dynamic> map) {
+    return EmployeeDatabaseMapper.fromDatabase(map);
+  }
+
+  /// Convert EmployeeModel to database map
+  Map<String, dynamic> toDatabase() {
+    return EmployeeDatabaseMapper.toDatabase(this);
+  }
+
+  /// Factory constructor to create EmployeeModel from entity
   factory EmployeeModel.fromEntity(Employee employee) {
     return EmployeeModel(
       id: employee.id,

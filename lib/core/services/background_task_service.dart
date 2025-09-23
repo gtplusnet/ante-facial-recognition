@@ -2,7 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:workmanager/workmanager.dart';
 
-import '../../app/injection.dart';
+import '../di/injection.dart';
 import '../storage/database_helper.dart';
 import '../utils/logger.dart';
 import 'offline_queue_manager.dart';
@@ -45,7 +45,8 @@ void callbackDispatcher() {
 Future<void> _initializeBackgroundDependencies() async {
   try {
     // Initialize database
-    final database = await DatabaseHelper.initializeDatabase();
+    final databaseHelper = DatabaseHelper();
+    final database = await databaseHelper.initializeDatabase();
     
     // Initialize Dio for API calls
     final dio = Dio(

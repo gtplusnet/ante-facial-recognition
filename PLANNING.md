@@ -438,6 +438,33 @@ await analytics.logEvent(
 - [ ] Sensitive logs removed
 - [ ] Security audit completed
 
+## 🔑 Device Authentication Flow
+
+### API Key Authentication
+The device authentication uses a pre-assigned API key that must be obtained from the backend administrator:
+
+1. **API Key Setup**:
+   - Each device is assigned a unique API key (format: `ante_device_[hash]`)
+   - The API key must be obtained from the backend admin before device setup
+   - API key is entered during initial device configuration
+
+2. **Authentication Process**:
+   - User enters API key in device setup page
+   - App validates API key against backend `/health` endpoint
+   - Backend returns device info (ID, name, location) if API key is valid
+   - API key is stored securely using flutter_secure_storage
+
+3. **API Request Flow**:
+   - All API requests include `x-api-key` header
+   - No separate device ID is needed - API key identifies the device
+   - Backend validates API key and returns appropriate device-scoped data
+
+4. **Security Considerations**:
+   - API keys are never hardcoded in the app
+   - Keys are stored in encrypted secure storage
+   - Invalid API keys result in authentication failure
+   - API keys can be revoked by backend admin
+
 ## 📝 Documentation Requirements
 
 - [ ] API documentation (OpenAPI/Swagger)

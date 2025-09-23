@@ -31,8 +31,8 @@ class ManpowerApiService {
     };
   }
 
-  /// Check API health status
-  Future<bool> checkHealth() async {
+  /// Check API health status and get device info
+  Future<Map<String, dynamic>?> checkHealth() async {
     try {
       Logger.info('Checking API health');
 
@@ -41,30 +41,45 @@ class ManpowerApiService {
         options: Options(headers: await _getHeaders()),
       );
 
-      Logger.success('API health check successful');
-      return response.statusCode == 200;
+      if (response.statusCode == 200) {
+        Logger.success('API health check successful');
+        return response.data as Map<String, dynamic>?;
+      }
+      return null;
     } catch (e) {
       Logger.error('API health check failed', error: e);
-      return false;
+      return null;
     }
   }
 
   /// Get list of employees with optional photos
   Future<List<EmployeeModel>> getEmployees({bool withPhotos = true}) async {
     try {
-      Logger.info('Fetching employees list');
+      Logger.info('[ManpowerApiService] Fetching employees list with photos=$withPhotos');
+
+      final headers = await _getHeaders();
+      Logger.debug('[ManpowerApiService] Request headers prepared');
+
+      final url = '$baseUrl/employees';
+      Logger.debug('[ManpowerApiService] Making GET request to: $url');
 
       final response = await _apiClient.get(
-        '$baseUrl/employees',
+        url,
         queryParameters: {'withPhotos': withPhotos},
-        options: Options(headers: await _getHeaders()),
+        options: Options(headers: headers),
       );
 
+      Logger.debug('[ManpowerApiService] Response received with status: ${response.statusCode}');
+      Logger.debug('[ManpowerApiService] Response data type: ${response.data.runtimeType}');
+
       if (response.statusCode == 200) {
-        final List<dynamic> data = response.data['data'] ?? response.data ?? [];
+        // Fixed API response parsing - check 'employees' field first
+        final List<dynamic> data = response.data['employees'] ?? response.data['data'] ?? response.data ?? [];
+        Logger.debug('[ManpowerApiService] Extracted ${data.length} employees from response');
+
         final employees = data.map((json) => EmployeeModel.fromJson(json)).toList();
 
-        Logger.success('Fetched ${employees.length} employees');
+        Logger.success('[ManpowerApiService] Successfully parsed ${employees.length} employees');
         return employees;
       } else {
         throw ServerException(
@@ -73,8 +88,9 @@ class ManpowerApiService {
         );
       }
     } catch (e) {
-      Logger.error('Failed to fetch employees', error: e);
+      Logger.error('[ManpowerApiService] Failed to fetch employees', error: e);
       if (e is DioException) {
+        Logger.error('[ManpowerApiService] DioException details: ${e.message}, Response: ${e.response?.data}');
         throw _handleDioError(e);
       }
       throw ServerException(message: 'Failed to fetch employees: $e');

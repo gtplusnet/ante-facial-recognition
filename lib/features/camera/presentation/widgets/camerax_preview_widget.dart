@@ -172,7 +172,7 @@ class _CameraXPreviewWidgetState extends State<CameraXPreviewWidget> {
                       alignment: Alignment.center,
                       // Mirror the preview for front camera
                       transform: widget.cameraXService.currentLensFacing == 1
-                          ? Matrix4.identity()..scale(-1.0, 1.0)
+                          ? (Matrix4.identity()..scale(-1.0, 1.0))
                           : Matrix4.identity(),
                       child: Texture(textureId: _initResult!.textureId),
                     ),

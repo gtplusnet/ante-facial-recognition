@@ -7,6 +7,10 @@
 4. Add discovered tasks - Document new requirements found during development
 5. Update PLANNING.md continuously - Improve and refine the plan as you encounter new issues, realize better approaches, or discover requirements during development
 6. Always use SOLID principle when developing.
+7. **ALWAYS RESTART APP AFTER CHANGES** - Never use hot reload, always kill and restart the Flutter app after making code changes to ensure proper initialization.
+   - Kill: `pkill -f "flutter run"` or `Ctrl+C` in the Flutter terminal
+   - Restart: `flutter run -d DEVICE_ID` (use `flutter devices` to get device ID)
+   - **Run in background for emulator**: Use `run_in_background: true` parameter when using Bash tool to avoid blocking terminal output
 
 ## 🎯 Quick Context
 Android face recognition app for employee time tracking using Flutter. All processing on-device for privacy and speed.
@@ -28,6 +32,15 @@ Android face recognition app for employee time tracking using Flutter. All proce
 ### Base URL
 `http://100.109.133.12:3000/api/public/manpower`
 
+### Testing Credentials
+```dart
+// Device ID obtained from device authentication
+// No default device ID - must authenticate first
+```
+
+### API Documentation
+📚 **Full API Documentation**: `/docs/MANPOWER_API.md`
+
 ### Essential Endpoints
 ```dart
 GET  /health                     # Device connectivity check
@@ -41,7 +54,7 @@ GET  /daily-logs                 # Attendance records
 ### Headers
 ```dart
 headers: {
-  'x-api-key': deviceApiKey,
+  'x-api-key': deviceApiKey,     // Obtained from device authentication
   'Content-Type': 'application/json',
 }
 ```
@@ -134,6 +147,52 @@ Workmanager().registerOneOffTask(
 | **Large APK** | Include all TF Lite ops | Use selective ops, ProGuard |
 | **Spoofing** | No liveness check | Implement passive liveness |
 | **Privacy Risk** | Store face images | Store only embeddings |
+
+## 📝 Checking Application Logs
+
+### Flutter Console Logs (Recommended)
+```bash
+# View live logs from running Flutter app
+# These show all Logger.info(), Logger.error(), print() statements
+# Look for the Flutter terminal where app is running
+
+# If running in background, use BashOutput tool to check logs
+# Background bash IDs are shown when flutter run is executed
+```
+
+### ADB Logcat (Android Device Logs)
+```bash
+# View all logs from connected device
+adb logcat
+
+# Filter by app package name
+adb logcat | grep "com.ante.facial_recognition"
+
+# Filter by log level (E=Error, W=Warning, I=Info, D=Debug)
+adb logcat *:E  # Show only errors
+
+# Clear log buffer before testing
+adb logcat -c
+
+# Save logs to file
+adb logcat > debug_logs.txt
+```
+
+### Application Logger Output
+The app uses a custom Logger class that prefixes messages:
+- `[INFO]` - General information
+- `[ERROR]` - Errors with stack traces
+- `[WARNING]` - Warnings
+- `[DEBUG]` - Debug information
+- `[SUCCESS]` - Successful operations
+
+Look for these patterns in the console output to track sync progress:
+```
+[INFO] === Starting Employee Sync Process ===
+[INFO] Step 1: Fetching employees from API with photos...
+[DEBUG] Processing employee 1/50: John Doe
+[SUCCESS] Step 2: Successfully fetched 50 employees from API
+```
 
 ## 🐛 Troubleshooting Guide
 

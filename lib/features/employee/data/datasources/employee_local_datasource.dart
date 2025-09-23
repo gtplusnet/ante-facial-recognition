@@ -4,8 +4,8 @@ import 'dart:typed_data';
 import 'package:injectable/injectable.dart';
 import 'package:sqflite/sqflite.dart';
 
-import '../../../../core/storage/database_helper.dart';
 import '../../../../core/utils/logger.dart';
+import '../../domain/entities/employee.dart';
 import '../models/employee_model.dart';
 
 class EmployeeLocalDataSource {
@@ -19,6 +19,34 @@ class EmployeeLocalDataSource {
   static const String _timeRecordsTable = 'time_records';
   static const String _faceEncodingsTable = 'face_encodings';
   static const String _syncMetadataTable = 'sync_metadata';
+
+  /// Helper method to build EmployeeModel from database map with face encodings
+  EmployeeModel _buildEmployeeFromDatabase(
+    Map<String, dynamic> map,
+    List<FaceEncoding> encodings,
+  ) {
+    // Use the fromDatabase constructor for basic employee data
+    final employee = EmployeeModel.fromDatabase(map);
+
+    // Create a new instance with the face encodings
+    return EmployeeModel(
+      id: employee.id,
+      name: employee.name,
+      email: employee.email,
+      phoneNumber: employee.phoneNumber,
+      department: employee.department,
+      position: employee.position,
+      employeeCode: employee.employeeCode,
+      photoUrl: employee.photoUrl,
+      photoBytes: employee.photoBytes,
+      faceEncodings: encodings,
+      isActive: employee.isActive,
+      metadata: employee.metadata,
+      createdAt: employee.createdAt,
+      updatedAt: employee.updatedAt,
+      lastSyncedAt: employee.lastSyncedAt,
+    );
+  }
 
   /// Initialize database tables
   static Future<void> createTables(Database db) async {
@@ -106,23 +134,9 @@ class EmployeeLocalDataSource {
         // Get face encodings for each employee
         final encodings = await getFaceEncodings(map['id']);
 
-        employees.add(EmployeeModel(
-          id: map['id'],
-          name: map['name'],
-          email: map['email'],
-          phoneNumber: map['phone_number'],
-          department: map['department'],
-          position: map['position'],
-          employeeCode: map['employee_code'],
-          photoUrl: map['photo_url'],
-          photoBytes: map['photo_bytes'],
-          faceEncodings: encodings,
-          isActive: map['is_active'] == 1,
-          metadata: map['metadata'] != null ? json.decode(map['metadata']) : null,
-          createdAt: map['created_at'] != null ? DateTime.parse(map['created_at']) : null,
-          updatedAt: map['updated_at'] != null ? DateTime.parse(map['updated_at']) : null,
-          lastSyncedAt: map['last_synced_at'] != null ? DateTime.parse(map['last_synced_at']) : null,
-        ));
+        // Use the helper method to build employee with encodings
+        final employee = _buildEmployeeFromDatabase(map, encodings);
+        employees.add(employee);
       }
 
       Logger.debug('Retrieved ${employees.length} employees from local storage');
@@ -148,23 +162,8 @@ class EmployeeLocalDataSource {
       final map = maps.first;
       final encodings = await getFaceEncodings(id);
 
-      return EmployeeModel(
-        id: map['id'],
-        name: map['name'],
-        email: map['email'],
-        phoneNumber: map['phone_number'],
-        department: map['department'],
-        position: map['position'],
-        employeeCode: map['employee_code'],
-        photoUrl: map['photo_url'],
-        photoBytes: map['photo_bytes'],
-        faceEncodings: encodings,
-        isActive: map['is_active'] == 1,
-        metadata: map['metadata'] != null ? json.decode(map['metadata']) : null,
-        createdAt: map['created_at'] != null ? DateTime.parse(map['created_at']) : null,
-        updatedAt: map['updated_at'] != null ? DateTime.parse(map['updated_at']) : null,
-        lastSyncedAt: map['last_synced_at'] != null ? DateTime.parse(map['last_synced_at']) : null,
-      );
+      // Use the helper method to build employee with encodings
+      return _buildEmployeeFromDatabase(map, encodings);
     } catch (e) {
       Logger.error('Failed to get employee $id', error: e);
       return null;
@@ -426,6 +425,48 @@ class EmployeeLocalDataSource {
     } catch (e) {
       Logger.error('Failed to update last sync date', error: e);
       throw Exception('Failed to update last sync date: $e');
+    }
+  }
+
+  /// Clear all employees from local storage
+  Future<void> clearAllEmployees() async {
+    try {
+      await _database.delete(_employeesTable);
+      Logger.info('Cleared all employees from local storage');
+    } catch (e) {
+      Logger.error('Failed to clear employees', error: e);
+      throw Exception('Failed to clear employees: $e');
+    }
+  }
+
+  /// Get all employees from local storage
+  Future<List<Employee>> getAllEmployees() async {
+    try {
+      final List<Map<String, dynamic>> maps = await _database.query(
+        _employeesTable,
+        orderBy: 'name ASC',
+      );
+
+      if (maps.isEmpty) {
+        return [];
+      }
+
+      final employees = <Employee>[];
+      for (final map in maps) {
+        try {
+          // Use the fromDatabase constructor for database records
+          final employeeModel = EmployeeModel.fromDatabase(map);
+          employees.add(employeeModel); // EmployeeModel extends Employee
+        } catch (e) {
+          Logger.error('Failed to parse employee from database', error: e);
+        }
+      }
+
+      Logger.debug('Loaded ${employees.length} employees from local storage');
+      return employees;
+    } catch (e) {
+      Logger.error('Failed to get all employees', error: e);
+      throw Exception('Failed to get all employees: $e');
     }
   }
 }

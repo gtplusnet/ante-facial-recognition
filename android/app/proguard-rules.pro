@@ -8,12 +8,23 @@
 
 # TensorFlow Lite
 -keep class org.tensorflow.lite.** { *; }
+-keep class org.tensorflow.lite.gpu.** { *; }
+-dontwarn org.tensorflow.lite.gpu.GpuDelegateFactory$Options
+-dontwarn org.tensorflow.lite.gpu.GpuDelegateFactory$Options$GpuBackend
+-keep class org.tensorflow.lite.gpu.GpuDelegateFactory { *; }
+-keep class org.tensorflow.lite.gpu.GpuDelegateFactory$* { *; }
 -keepclasseswithmembernames class * {
     native <methods>;
 }
 -keepclassmembers class org.tensorflow.lite.** {
     *;
 }
+
+# Google Play Core (for split APK support)
+-dontwarn com.google.android.play.core.splitcompat.SplitCompatApplication
+-dontwarn com.google.android.play.core.splitinstall.**
+-dontwarn com.google.android.play.core.tasks.**
+-keep class com.google.android.play.core.** { *; }
 
 # Google ML Kit
 -keep class com.google.mlkit.** { *; }

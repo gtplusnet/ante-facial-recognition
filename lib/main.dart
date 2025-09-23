@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:hydrated_bloc/hydrated_bloc.dart';
 import 'package:path_provider/path_provider.dart';
@@ -11,6 +12,9 @@ import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
 import 'core/utils/app_bloc_observer.dart';
 import 'core/utils/logger.dart';
+import 'features/authentication/presentation/bloc/auth_bloc.dart';
+import 'features/authentication/presentation/bloc/auth_event.dart';
+import 'features/employee/presentation/bloc/employee_bloc.dart';
 
 Future<void> main() async {
   await runZonedGuarded(
@@ -90,20 +94,30 @@ class AnteApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ScreenUtilInit(
-      designSize: const Size(375, 812), // iPhone X design size
-      minTextAdapt: true,
-      splitScreenMode: false,
-      builder: (context, child) {
-        return MaterialApp.router(
-          title: 'ANTE Facial Recognition',
-          debugShowCheckedModeBanner: false,
-          theme: AppTheme.lightTheme,
-          darkTheme: AppTheme.darkTheme,
-          themeMode: ThemeMode.system,
-          routerConfig: AppRouter.router,
-        );
-      },
+    return MultiBlocProvider(
+      providers: [
+        BlocProvider<AuthBloc>(
+          create: (_) => getIt<AuthBloc>()..add(const CheckAuthStatus()),
+        ),
+        BlocProvider<EmployeeBloc>(
+          create: (_) => getIt<EmployeeBloc>(),
+        ),
+      ],
+      child: ScreenUtilInit(
+        designSize: const Size(375, 812), // iPhone X design size
+        minTextAdapt: true,
+        splitScreenMode: false,
+        builder: (context, child) {
+          return MaterialApp.router(
+            title: 'ANTE Facial Recognition',
+            debugShowCheckedModeBanner: false,
+            theme: AppTheme.lightTheme,
+            darkTheme: AppTheme.darkTheme,
+            themeMode: ThemeMode.system,
+            routerConfig: AppRouter.router,
+          );
+        },
+      ),
     );
   }
 }

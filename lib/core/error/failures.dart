@@ -82,3 +82,10 @@ class NotFoundException extends Failure {
     super.code,
   });
 }
+
+class DataFailure extends Failure {
+  const DataFailure({
+    required super.message,
+    super.code,
+  });
+}

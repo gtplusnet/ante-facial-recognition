@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../features/authentication/presentation/pages/device_setup_page.dart';
+import '../../features/employee/presentation/pages/employee_list_page.dart';
 import '../../features/face_recognition/presentation/pages/face_recognition_page.dart';
 import '../../features/main_shell/presentation/pages/main_shell_page.dart';
+import '../../features/settings/presentation/pages/settings_page.dart';
 import '../../features/splash/presentation/pages/splash_page.dart';
 
 class AppRouter {
@@ -24,7 +27,7 @@ class AppRouter {
       GoRoute(
         path: '/device-setup',
         name: 'deviceSetup',
-        builder: (context, state) => const Placeholder(), // Will be implemented
+        builder: (context, state) => const DeviceSetupPage(),
       ),
       StatefulShellRoute.indexedStack(
         builder: (context, state, navigationShell) {
@@ -45,10 +48,7 @@ class AppRouter {
               GoRoute(
                 path: '/employees',
                 name: 'employees',
-                builder: (context, state) => const MainShellScaffold(
-                  title: 'Employees',
-                  child: Center(child: Text('Employees Screen')),
-                ),
+                builder: (context, state) => const EmployeeListPage(),
               ),
             ],
           ),
@@ -69,10 +69,7 @@ class AppRouter {
               GoRoute(
                 path: '/settings',
                 name: 'settings',
-                builder: (context, state) => const MainShellScaffold(
-                  title: 'Settings',
-                  child: Center(child: Text('Settings Screen')),
-                ),
+                builder: (context, state) => const SettingsPage(),
                 routes: [
                   GoRoute(
                     path: 'admin',

@@ -91,6 +91,16 @@ class SecureStorageHelper {
     }
   }
 
+  Future<void> deleteLastSyncTime() async {
+    try {
+      await _storage.delete(key: AppConstants.lastSyncKey);
+      Logger.success('Last sync time deleted');
+    } catch (e) {
+      Logger.error('Failed to delete last sync time', error: e);
+      rethrow;
+    }
+  }
+
   // Employee Data (for offline caching)
   Future<void> saveEmployeeData(Map<String, dynamic> data) async {
     try {

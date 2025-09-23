@@ -12,6 +12,8 @@ class Logger {
     Object? data,
   }) {
     if (kDebugMode) {
+      final logMessage = '[DEBUG] $message';
+      print(logMessage);
       developer.log(
         message,
         name: _name,
@@ -26,6 +28,9 @@ class Logger {
     Object? data,
   }) {
     if (kDebugMode) {
+      final logMessage = '[INFO] $message';
+      print(logMessage);
+      if (data != null) print('  Data: $data');
       developer.log(
         '📘 $message',
         name: _name,
@@ -41,6 +46,9 @@ class Logger {
     Object? data,
   }) {
     if (kDebugMode) {
+      final logMessage = '[WARNING] $message';
+      print(logMessage);
+      if (data != null) print('  Data: $data');
       developer.log(
         '⚠️ $message',
         name: _name,
@@ -57,6 +65,10 @@ class Logger {
     StackTrace? stackTrace,
   }) {
     if (kDebugMode) {
+      final logMessage = '[ERROR] $message';
+      print(logMessage);
+      if (error != null) print('  Error: $error');
+      if (stackTrace != null) print('  StackTrace: $stackTrace');
       developer.log(
         '❌ $message',
         name: _name,
@@ -73,6 +85,9 @@ class Logger {
     Object? data,
   }) {
     if (kDebugMode) {
+      final logMessage = '[SUCCESS] $message';
+      print(logMessage);
+      if (data != null) print('  Data: $data');
       developer.log(
         '✅ $message',
         name: _name,
@@ -88,6 +103,8 @@ class Logger {
     Object? data,
   }) {
     if (kDebugMode) {
+      final logMessage = '[NETWORK] $message';
+      print(logMessage);
       developer.log(
         '🌐 $message',
         name: '$_name-NETWORK',

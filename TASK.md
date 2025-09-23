@@ -71,10 +71,21 @@
 ### Navigation
 - ✅ Setup go_router package
 - ✅ Create route configuration
-- ⬜ Implement route guards for authentication
+- ✅ Implement route guards for authentication
 - ⬜ Setup deep linking support
 - ✅ Create navigation service
 - ✅ Implement bottom navigation structure
+
+### Device Authentication
+- ✅ Create authentication feature module structure
+- ✅ Implement device setup page with API key input
+- ✅ Create authentication BLoC for state management
+- ✅ Validate API key against health endpoint
+- ✅ Store API key in secure storage upon successful validation
+- ✅ Extract device info from health check response
+- ✅ Implement auto-redirect from splash based on auth status
+- ⬜ Add logout/device reset functionality
+- ✅ Handle authentication errors and retry mechanism
 
 ### Theme & UI Foundation
 - ✅ Implement Material Design 3 theme
@@ -142,6 +153,20 @@
 - ⬜ Create face encoding cache
 - ⬜ Implement delta sync mechanism
 
+### Employee Synchronization
+- ✅ Create sync employees use case
+- ✅ Implement employee sync page UI - Completed 2025-09-23
+- ✅ Add sync progress indicators - Completed 2025-09-23
+- ✅ Fetch employees with photos from API
+- ✅ Download and process profile images
+- ⬜ Generate face embeddings from photos
+- ✅ Store employees in local SQLite database
+- ⬜ Implement periodic background sync (15 minutes)
+- ⬜ Add manual sync trigger in settings
+- ✅ Handle sync conflicts and failures
+- ✅ Display last sync timestamp - Completed 2025-09-23
+- ✅ Show employee count and sync status - Completed 2025-09-23
+
 ### Face Matching
 - ✅ Implement Euclidean distance calculator
 - ✅ Create face matching algorithm
@@ -184,7 +209,7 @@
 - ⬜ Implement AES-256 for face encodings
 - ⬜ Configure Android Keystore integration
 - ⬜ Add certificate pinning for API calls
-- ⬜ Implement secure storage with flutter_secure_storage
+- ✅ Implement secure storage with flutter_secure_storage
 - ⬜ Create data wiping functionality
 
 ### App Security
@@ -413,20 +438,20 @@
 ## 📊 Progress Tracking
 
 ### Overall Statistics
-- **Total Tasks**: 288
-- **Completed**: 121
+- **Total Tasks**: 308
+- **Completed**: 143
 - **In Progress**: 0
-- **Not Started**: 167
-- **Completion**: 42.0%
+- **Not Started**: 165
+- **Completion**: 46.4%
 
 ### Milestone Status
 | Milestone | Tasks | Completed | Progress |
 |-----------|-------|-----------|----------|
 | M1: Foundation | 24 | 19 | 79% |
-| M2: Infrastructure | 24 | 24 | 100% |
+| M2: Infrastructure | 32 | 31 | 97% |
 | M3: Camera & ML | 24 | 24 | 100% |
-| M4: Recognition | 24 | 24 | 100% |
-| M5: Security | 24 | 0 | 0% |
+| M4: Recognition | 36 | 32 | 89% |
+| M5: Security | 24 | 1 | 4% |
 | M6: Business Logic | 24 | 24 | 100% |
 | M7: UI/UX | 24 | 2 | 8% |
 | M8: Testing | 30 | 0 | 0% |
@@ -465,6 +490,20 @@
 ## 📝 Notes
 
 ### Recent Progress (2025-09-23)
+- ✅ Added comprehensive API documentation (`/docs/MANPOWER_API.md`)
+- ✅ Updated CLAUDE.md with test device ID credentials
+- ✅ Implemented complete authentication module with Clean Architecture
+- ✅ Created device setup page with Device ID authentication
+- ✅ Implemented authentication BLoC for state management
+- ✅ Created sync employees use case for data synchronization
+- ✅ Updated navigation flow with auth-based routing
+- ✅ Modified splash screen to check authentication status
+- ✅ Integrated secure storage for API credentials
+- API base URL configured: `http://100.109.133.12:3000/api/public/manpower`
+- Authentication requires API key only (format: `ante_device_[hash]`)
+- All API requests use `x-api-key` header for authentication
+
+### Previous Updates
 - Fixed face detection overlay issues
   - Added oval positioning guide to FaceRecognitionPage
   - Fixed coordinate transformation for face detection rectangle alignment
