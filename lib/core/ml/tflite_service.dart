@@ -152,7 +152,10 @@ class TFLiteService {
   Future<Uint8List> _loadModelFromAssets() async {
     try {
       final modelData = await rootBundle.load(modelPath);
-      return modelData.buffer.asUint8List();
+      return modelData.buffer.asUint8List(
+        modelData.offsetInBytes,
+        modelData.lengthInBytes,
+      );
     } catch (e) {
       Logger.error('Failed to load model from assets', error: e);
       throw Exception('Model file not found: $modelPath');

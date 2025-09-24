@@ -3,7 +3,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../features/authentication/presentation/pages/device_setup_page.dart';
 import '../../features/employee/presentation/pages/employee_list_page.dart';
-import '../../features/face_recognition/presentation/pages/face_recognition_page.dart';
+import '../../features/face_recognition/presentation/pages/simplified_camera_screen.dart';
 import '../../features/main_shell/presentation/pages/main_shell_page.dart';
 import '../../features/settings/presentation/pages/settings_page.dart';
 import '../../features/splash/presentation/pages/splash_page.dart';
@@ -39,7 +39,7 @@ class AppRouter {
               GoRoute(
                 path: '/face-recognition',
                 name: 'faceRecognition',
-                builder: (context, state) => const FaceRecognitionPage(),
+                builder: (context, state) => const SimplifiedCameraScreen(),
               ),
             ],
           ),

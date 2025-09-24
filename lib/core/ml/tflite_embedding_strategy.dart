@@ -46,8 +46,11 @@ class TFLiteEmbeddingStrategy implements EmbeddingStrategy {
       Logger.info('Initializing TFLite embedding strategy...');
 
       // Load model from assets
-      final modelBytes = await rootBundle.load(modelPath);
-      final buffer = modelBytes.buffer.asUint8List();
+      final modelData = await rootBundle.load(modelPath);
+      final buffer = modelData.buffer.asUint8List(
+        modelData.offsetInBytes,
+        modelData.lengthInBytes,
+      );
 
       // Create interpreter options with GPU delegation
       final options = InterpreterOptions();

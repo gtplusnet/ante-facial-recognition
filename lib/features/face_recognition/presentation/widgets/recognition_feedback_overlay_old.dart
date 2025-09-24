@@ -461,44 +461,47 @@ class _ProcessingIndicator extends StatelessWidget {
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
           // Animated face scanning icon
-          SizedBox(
-            width: 100.w,
-            height: 100.h,
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                Icon(
-                  Icons.face,
-                  size: 60.sp,
-                  color: Colors.blue,
-                ),
-                SizedBox(
-                  width: 80.w,
-                  height: 80.h,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 3.w,
-                    valueColor: const AlwaysStoppedAnimation<Color>(Colors.blue),
+          Flexible(
+            child: SizedBox(
+              width: 80.w,
+              height: 80.h,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  Icon(
+                    Icons.face,
+                    size: 50.sp,
+                    color: Colors.blue,
                   ),
-                ),
-              ],
+                  SizedBox(
+                    width: 70.w,
+                    height: 70.h,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 3.w,
+                      valueColor: const AlwaysStoppedAnimation<Color>(Colors.blue),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
-          SizedBox(height: 20.h),
+          SizedBox(height: 12.h),
           Text(
             'Processing',
             style: TextStyle(
-              fontSize: 18.sp,
+              fontSize: 16.sp,
               fontWeight: FontWeight.bold,
               color: Colors.black87,
             ),
           ),
-          SizedBox(height: 8.h),
+          SizedBox(height: 4.h),
           Text(
             'Please wait...',
             style: TextStyle(
-              fontSize: 14.sp,
+              fontSize: 12.sp,
               color: Colors.black54,
             ),
           ),
