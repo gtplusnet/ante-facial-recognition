@@ -15,6 +15,7 @@ import 'core/utils/logger.dart';
 import 'features/authentication/presentation/bloc/auth_bloc.dart';
 import 'features/authentication/presentation/bloc/auth_event.dart';
 import 'features/employee/presentation/bloc/employee_bloc.dart';
+import 'features/employee/presentation/bloc/employee_event.dart';
 
 Future<void> main() async {
   await runZonedGuarded(
@@ -108,16 +109,50 @@ class AnteApp extends StatelessWidget {
         minTextAdapt: true,
         splitScreenMode: false,
         builder: (context, child) {
-          return MaterialApp.router(
-            title: 'ANTE Facial Recognition',
-            debugShowCheckedModeBanner: false,
-            theme: AppTheme.lightTheme,
-            darkTheme: AppTheme.darkTheme,
-            themeMode: ThemeMode.system,
-            routerConfig: AppRouter.router,
+          return _DebugAutoTrigger(
+            child: MaterialApp.router(
+              title: 'ANTE Facial Recognition',
+              debugShowCheckedModeBanner: false,
+              theme: AppTheme.lightTheme,
+              darkTheme: AppTheme.darkTheme,
+              themeMode: ThemeMode.system,
+              routerConfig: AppRouter.router,
+            ),
           );
         },
       ),
     );
+  }
+}
+
+class _DebugAutoTrigger extends StatefulWidget {
+  final Widget child;
+
+  const _DebugAutoTrigger({required this.child});
+
+  @override
+  State<_DebugAutoTrigger> createState() => _DebugAutoTriggerState();
+}
+
+class _DebugAutoTriggerState extends State<_DebugAutoTrigger> {
+  @override
+  void initState() {
+    super.initState();
+    // Trigger face encoding generation after 5 seconds
+    Timer(const Duration(seconds: 5), () {
+      Logger.info('=== DEBUG: Auto-triggering face encoding generation ===');
+      try {
+        final employeeBloc = context.read<EmployeeBloc>();
+        employeeBloc.add(const GenerateAllFaceEmbeddings());
+        Logger.info('=== DEBUG: Face encoding generation triggered successfully ===');
+      } catch (e) {
+        Logger.error('=== DEBUG: Failed to trigger face encoding generation ===', error: e);
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return widget.child;
   }
 }

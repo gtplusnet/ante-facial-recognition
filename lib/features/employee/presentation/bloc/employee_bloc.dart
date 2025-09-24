@@ -7,28 +7,36 @@ import 'package:injectable/injectable.dart';
 import '../../../../core/usecases/usecase.dart';
 import '../../../../core/utils/logger.dart';
 import '../../data/datasources/employee_local_datasource.dart';
+import '../../data/models/employee_model.dart';
 import '../../domain/entities/employee.dart';
 import '../../domain/repositories/employee_repository.dart';
 import '../../domain/usecases/sync_employees_usecase.dart';
+import '../../domain/usecases/generate_face_encoding_usecase.dart';
+import '../../../face_recognition/data/services/simplified_face_recognition_service.dart';
 import 'employee_event.dart';
 import 'employee_state.dart';
 
 @injectable
 class EmployeeBloc extends Bloc<EmployeeEvent, EmployeeState> {
   final SyncEmployeesUseCase _syncEmployeesUseCase;
+  final GenerateFaceEncodingUseCase _generateFaceEncodingUseCase;
   final EmployeeRepository _employeeRepository;
   final EmployeeLocalDataSource _localDataSource;
+  final SimplifiedFaceRecognitionService _faceRecognitionService;
 
   EmployeeBloc(
     this._syncEmployeesUseCase,
+    this._generateFaceEncodingUseCase,
     this._employeeRepository,
     this._localDataSource,
+    this._faceRecognitionService,
   ) : super(const EmployeeInitial()) {
     on<LoadEmployees>(_onLoadEmployees);
     on<SyncEmployees>(_onSyncEmployees);
     on<RefreshEmployees>(_onRefreshEmployees);
     on<SearchEmployees>(_onSearchEmployees);
     on<GenerateFaceEmbeddings>(_onGenerateFaceEmbeddings);
+    on<GenerateAllFaceEmbeddings>(_onGenerateAllFaceEmbeddings);
     on<ClearEmployeeCache>(_onClearEmployeeCache);
   }
 
@@ -207,6 +215,93 @@ class EmployeeBloc extends Bloc<EmployeeEvent, EmployeeState> {
       Logger.error('Failed to generate face embedding', error: e);
       emit(EmployeeError(
         message: 'Failed to generate embedding: ${e.toString()}',
+      ));
+    }
+  }
+
+  Future<void> _onGenerateAllFaceEmbeddings(
+    GenerateAllFaceEmbeddings event,
+    Emitter<EmployeeState> emit,
+  ) async {
+    try {
+      Logger.info('Starting face encoding generation for all employees');
+
+      emit(const EmployeeLoading());
+
+      // Get all employees with photos
+      final employees = await _localDataSource.getAllEmployees();
+      final employeesWithPhotos = employees.where((e) => e.hasPhoto && e.photoBytes != null).toList();
+
+      if (employeesWithPhotos.isEmpty) {
+        emit(const EmployeeError(message: 'No employees with photos found. Please sync employees first.'));
+        return;
+      }
+
+      Logger.info('Found ${employeesWithPhotos.length} employees with photos to process');
+
+      int processedCount = 0;
+      int successCount = 0;
+      int errorCount = 0;
+      final List<String> errorMessages = [];
+
+      for (final employee in employeesWithPhotos) {
+        try {
+          Logger.info('Processing face encoding for ${employee.name}...');
+
+          emit(EmployeeGeneratingEmbedding(
+            employeeId: employee.id,
+            employeeName: employee.name,
+            progress: processedCount / employeesWithPhotos.length,
+          ));
+
+          // Generate face encoding using the proper use case
+          final result = await _generateFaceEncodingUseCase.generateAndApplyEncoding(
+            employee.copyWith(),
+            employee.photoBytes!,
+          );
+
+          // Update the employee with the new encoding
+          await _localDataSource.saveEmployee(EmployeeModel.fromEntity(result));
+
+          successCount++;
+          Logger.success('Generated face encoding for ${employee.name}');
+
+        } catch (e) {
+          errorCount++;
+          final errorMsg = 'Failed to generate encoding for ${employee.name}: $e';
+          errorMessages.add(errorMsg);
+          Logger.error(errorMsg, error: e);
+        }
+
+        processedCount++;
+      }
+
+      Logger.info('Face encoding generation completed: $successCount successful, $errorCount errors');
+
+      if (errorCount > 0) {
+        emit(EmployeeError(message: 'Generated $successCount encodings with $errorCount errors:\n${errorMessages.take(3).join('\n')}${errorMessages.length > 3 ? '\n... and ${errorMessages.length - 3} more errors' : ''}'));
+      } else {
+        emit(EmployeeEmbeddingGenerated(
+          employeeId: '',
+          message: 'Successfully generated face encodings for $successCount employees',
+        ));
+      }
+
+      // Reload face recognition service to pick up new encodings
+      try {
+        await _faceRecognitionService.reloadEmployees();
+        Logger.success('Face recognition service reloaded with updated encodings');
+      } catch (e) {
+        Logger.warning('Failed to reload face recognition service: $e');
+      }
+
+      // Reload employees to show updated data
+      add(const LoadEmployees());
+
+    } catch (e) {
+      Logger.error('Failed to generate face embeddings', error: e);
+      emit(EmployeeError(
+        message: 'Failed to generate face embeddings: ${e.toString()}',
       ));
     }
   }

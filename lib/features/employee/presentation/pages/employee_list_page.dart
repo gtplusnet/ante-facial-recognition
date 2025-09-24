@@ -209,6 +209,20 @@ class _EmployeeListPageState extends State<EmployeeListPage> {
                 ),
               ),
             ),
+            const SizedBox(width: 12),
+            OutlinedButton.icon(
+              onPressed: () {
+                context.read<EmployeeBloc>().add(const GenerateAllFaceEmbeddings());
+              },
+              icon: const Icon(Icons.face),
+              label: const Text('Generate Encodings'),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 12,
+                ),
+              ),
+            ),
           ],
         ),
       );

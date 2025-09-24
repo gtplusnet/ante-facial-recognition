@@ -37,6 +37,10 @@ class GenerateFaceEmbeddings extends EmployeeEvent {
   List<Object?> get props => [employeeId];
 }
 
+class GenerateAllFaceEmbeddings extends EmployeeEvent {
+  const GenerateAllFaceEmbeddings();
+}
+
 class ClearEmployeeCache extends EmployeeEvent {
   const ClearEmployeeCache();
 }

@@ -193,11 +193,6 @@ class SimplifiedFaceRecognitionService {
     }
   }
 
-  /// Reload employees (useful for sync updates)
-  Future<void> reloadEmployees() async {
-    await _loadEmployees();
-  }
-
   /// Get quality improvement message based on quality score
   String _getQualityMessage(double quality) {
     if (quality < 0.3) {
@@ -209,6 +204,13 @@ class SimplifiedFaceRecognitionService {
     } else {
       return 'Face quality good';
     }
+  }
+
+  /// Reload employees and their face encodings
+  Future<void> reloadEmployees() async {
+    Logger.info('Reloading employees and face encodings...');
+    await _loadEmployees();
+    Logger.info('Reloaded ${_employees.length} employees, ${_encodings.length} have face encodings');
   }
 
   /// Get current stats

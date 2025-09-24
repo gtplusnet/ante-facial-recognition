@@ -454,9 +454,12 @@ class EmployeeLocalDataSource {
       final employees = <Employee>[];
       for (final map in maps) {
         try {
-          // Use the fromDatabase constructor for database records
-          final employeeModel = EmployeeModel.fromDatabase(map);
-          employees.add(employeeModel); // EmployeeModel extends Employee
+          // Get face encodings for each employee
+          final encodings = await getFaceEncodings(map['id']);
+
+          // Use the helper method to build employee with encodings
+          final employee = _buildEmployeeFromDatabase(map, encodings);
+          employees.add(employee);
         } catch (e) {
           Logger.error('Failed to parse employee from database', error: e);
         }

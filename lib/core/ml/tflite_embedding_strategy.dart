@@ -45,12 +45,29 @@ class TFLiteEmbeddingStrategy implements EmbeddingStrategy {
     try {
       Logger.info('Initializing TFLite embedding strategy...');
 
-      // Load model from assets
+      // Load model from assets with detailed validation
+      Logger.debug('Loading model from path: $modelPath');
       final modelData = await rootBundle.load(modelPath);
       final buffer = modelData.buffer.asUint8List(
         modelData.offsetInBytes,
         modelData.lengthInBytes,
       );
+
+      Logger.debug('Model buffer loaded: ${buffer.length} bytes');
+
+      // Validate model buffer
+      if (buffer.isEmpty) {
+        throw Exception('Model buffer is empty');
+      }
+
+      // Check for TFLite magic number (should start with specific bytes)
+      if (buffer.length < 8) {
+        throw Exception('Model buffer too small: ${buffer.length} bytes');
+      }
+
+      // Log first few bytes for debugging
+      final headerBytes = buffer.take(16).toList();
+      Logger.debug('Model header bytes: ${headerBytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}');
 
       // Create interpreter options with enhanced GPU delegation
       final options = InterpreterOptions();
@@ -58,8 +75,20 @@ class TFLiteEmbeddingStrategy implements EmbeddingStrategy {
       // Try to enable GPU delegate with enhanced error handling
       await _tryEnableGpuDelegate(options);
 
-      // Create interpreter
-      _interpreter = Interpreter.fromBuffer(buffer, options: options);
+      // Create interpreter with detailed error handling
+      Logger.debug('Creating interpreter from buffer...');
+      try {
+        _interpreter = Interpreter.fromBuffer(buffer, options: options);
+        Logger.debug('Interpreter created successfully');
+      } catch (interpreterError) {
+        Logger.error('Interpreter creation failed: $interpreterError');
+
+        // Try without GPU delegate as fallback
+        Logger.info('Retrying without GPU delegate...');
+        final cpuOptions = InterpreterOptions();
+        _interpreter = Interpreter.fromBuffer(buffer, options: cpuOptions);
+        Logger.success('Interpreter created successfully with CPU-only mode');
+      }
 
       // Get input and output shapes
       _inputShape = _interpreter!.getInputTensor(0).shape;
@@ -71,6 +100,11 @@ class TFLiteEmbeddingStrategy implements EmbeddingStrategy {
       Logger.debug('Input shape: $_inputShape, type: $_inputType');
       Logger.debug('Output shape: $_outputShape, type: $_outputType');
 
+      // Validate model architecture
+      if (_inputShape!.length != 4 || _outputShape!.length != 2) {
+        Logger.warning('Unexpected model architecture: input=${_inputShape}, output=${_outputShape}');
+      }
+
       // Initialize isolate for background processing
       await _initializeIsolate();
 
@@ -78,6 +112,7 @@ class TFLiteEmbeddingStrategy implements EmbeddingStrategy {
       Logger.success('TFLite embedding strategy initialized');
     } catch (e) {
       Logger.error('Failed to initialize TFLite strategy', error: e);
+      Logger.error('Stack trace: ${StackTrace.current}');
       _isInitialized = false;
       rethrow;
     }
