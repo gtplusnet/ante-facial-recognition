@@ -8,6 +8,7 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 
 import '../../../../core/di/injection.dart';
+import '../../../../core/platform/render_aware_widget.dart';
 import '../../../../core/utils/logger.dart';
 import '../../../employee/domain/entities/employee.dart';
 import '../../../employee/presentation/bloc/employee_bloc.dart';
@@ -422,26 +423,29 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          // Camera preview
-          _buildCameraPreview(),
+    return RenderAwareWidget(
+      showSeLinuxInfo: true,
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: Stack(
+          fit: StackFit.expand,
+          children: [
+            // Camera preview
+            _buildCameraPreview(),
 
-          // Face positioning guide
-          _buildPositioningGuide(),
+            // Face positioning guide
+            _buildPositioningGuide(),
 
-          // Quality indicator overlay
-          _buildQualityIndicator(),
+            // Quality indicator overlay
+            _buildQualityIndicator(),
 
-          // Top bar
-          _buildTopBar(),
+            // Top bar
+            _buildTopBar(),
 
-          // Bottom status
-          _buildBottomStatus(),
-        ],
+            // Bottom status
+            _buildBottomStatus(),
+          ],
+        ),
       ),
     );
   }
