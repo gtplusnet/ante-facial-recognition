@@ -31,10 +31,22 @@ class SimplifiedCameraScreen extends StatefulWidget {
   State<SimplifiedCameraScreen> createState() => _SimplifiedCameraScreenState();
 }
 
+// Camera state enum
+enum CameraState {
+  idle,
+  initializing,
+  streaming,
+  paused,
+  error,
+}
+
 class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
     with WidgetsBindingObserver, RouteAware {
   // Camera and face detection
   CameraController? _cameraController;
+  CameraState _cameraState = CameraState.idle;
+  bool _isVisible = false;
+  Timer? _visibilityDebounceTimer;
   final FaceDetector _faceDetector = FaceDetector(
     options: FaceDetectorOptions(
       performanceMode: FaceDetectorMode.accurate, // Changed to accurate mode for better detection
@@ -221,6 +233,8 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
 
   Future<void> _initializeCamera() async {
     try {
+      _cameraState = CameraState.initializing;
+
       // Ensure previous camera is properly disposed
       await _disposeCamera();
 
@@ -251,7 +265,7 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
         camera,
         ResolutionPreset.max, // Using max resolution for best quality
         enableAudio: false,
-        // Removed imageFormatGroup to let camera choose optimal format
+        imageFormatGroup: ImageFormatGroup.yuv420, // Force consistent format
       );
 
       await _cameraController!.initialize();
@@ -264,6 +278,7 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
 
       if (_cameraController!.value.isInitialized) {
         Logger.success('Camera initialized successfully');
+        _cameraState = CameraState.streaming;
         setState(() {});
 
         // Add small delay to ensure camera is fully ready
@@ -401,6 +416,55 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
       Logger.error('Error disposing camera', error: e);
       // Force null the controller even if disposal fails
       _cameraController = null;
+    }
+  }
+
+  /// Pause camera stream without disposing the controller
+  Future<void> _pauseCameraStream() async {
+    if (_cameraState == CameraState.paused || _isDisposing) {
+      return;
+    }
+
+    try {
+      Logger.info('Pausing camera stream...');
+      _cameraState = CameraState.paused;
+      await _stopImageStream();
+      // Don't dispose the controller, just stop the stream
+      Logger.success('Camera stream paused');
+    } catch (e) {
+      Logger.error('Error pausing camera stream', error: e);
+      _cameraState = CameraState.error;
+    }
+  }
+
+  /// Resume camera operation after being paused
+  Future<void> _resumeCamera() async {
+    if (_cameraState == CameraState.streaming || _isDisposing) {
+      return;
+    }
+
+    try {
+      Logger.info('Resuming camera...');
+
+      // Check if camera controller exists and is initialized
+      if (_cameraController != null && _cameraController!.value.isInitialized) {
+        // Camera is initialized, just restart the stream
+        Logger.info('Restarting image stream...');
+        _cameraState = CameraState.streaming;
+        _startImageStream();
+        setState(() {
+          _statusMessage = 'Ready';
+        });
+      } else {
+        // Camera needs to be initialized
+        Logger.info('Camera not initialized, initializing...');
+        await _initializeCamera();
+      }
+    } catch (e) {
+      Logger.error('Error resuming camera', error: e);
+      _cameraState = CameraState.error;
+      // Try full reinitialization on error
+      await _initializeCamera();
     }
   }
 
@@ -1011,19 +1075,28 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
     return VisibilityDetector(
       key: const Key('camera_screen'),
       onVisibilityChanged: (visibilityInfo) {
-        final visiblePercentage = visibilityInfo.visibleFraction * 100;
+        // Cancel any pending debounce timer
+        _visibilityDebounceTimer?.cancel();
 
-        if (visiblePercentage == 0) {
-          // Page is completely hidden
-          Logger.info('Camera screen hidden - pausing camera');
-          _safePauseCamera();
-        } else if (visiblePercentage > 0 && !_isDisposing) {
-          // Page became visible
-          if (_cameraController == null || !_cameraController!.value.isInitialized) {
-            Logger.info('Camera screen visible - initializing camera');
-            _initializeCamera();
+        // Debounce visibility changes to prevent rapid firing
+        _visibilityDebounceTimer = Timer(const Duration(milliseconds: 100), () {
+          final visiblePercentage = visibilityInfo.visibleFraction * 100;
+          final wasVisible = _isVisible;
+          _isVisible = visiblePercentage > 0;
+
+          // Only act on actual state changes
+          if (wasVisible != _isVisible) {
+            if (!_isVisible) {
+              // Page is now hidden
+              Logger.info('Camera screen hidden - pausing camera stream');
+              _pauseCameraStream();
+            } else if (_isVisible && !_isDisposing) {
+              // Page became visible
+              Logger.info('Camera screen visible - resuming camera');
+              _resumeCamera();
+            }
           }
-        }
+        });
       },
       child: RenderAwareWidget(
         showSeLinuxInfo: true,
