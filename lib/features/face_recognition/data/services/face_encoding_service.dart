@@ -97,19 +97,25 @@ class FaceEncodingService {
     CameraImage cameraImage,
     CameraDescription cameraDescription,
   ) async {
+    Logger.info('>>> FaceEncodingService.extractFromCameraImage START <<<');
+    Logger.info('Camera image dimensions: ${cameraImage.width}x${cameraImage.height}');
+    Logger.info('Camera description: ${cameraDescription.name}');
+    Logger.info('Is processing: $_isProcessing');
+
     // Quick null/validity checks before processing
     try {
       if (cameraImage.planes.isEmpty) {
-        Logger.warning('Camera image has no planes');
+        Logger.warning('Camera image has no planes - returning null');
         return null;
       }
+      Logger.info('Camera image has ${cameraImage.planes.length} planes');
     } catch (e) {
       Logger.error('Invalid camera image provided', error: e);
       return null;
     }
 
     if (_isProcessing) {
-      Logger.warning('Already processing a face');
+      Logger.warning('Already processing a face - skipping');
       return null;
     }
 
@@ -118,6 +124,9 @@ class FaceEncodingService {
       final startTime = DateTime.now();
 
       // Detect faces in the image with enhanced error handling
+      Logger.info('Step 1: Detecting faces in camera image...');
+      final faceDetectionStopwatch = Stopwatch()..start();
+
       final faces = await _faceDetectionService.detectFacesFromCameraImage(
         cameraImage,
         cameraDescription,
@@ -126,53 +135,92 @@ class FaceEncodingService {
         throw Exception('Face detection error: $e');
       });
 
+      faceDetectionStopwatch.stop();
+      Logger.info('Face detection completed in ${faceDetectionStopwatch.elapsedMilliseconds}ms');
+      Logger.info('Detected ${faces.length} faces');
+
       if (faces.isEmpty) {
-        Logger.debug('No faces detected in camera image');
+        Logger.debug('No faces detected in camera image - returning null');
         return null;
+      }
+
+      for (int i = 0; i < faces.length; i++) {
+        final face = faces[i];
+        Logger.info('Face $i: bounds=${face.bounds.left},${face.bounds.top},${face.bounds.width}x${face.bounds.height}');
+        Logger.info('Face $i: quality=${face.qualityScore}');
       }
 
       // Use the first face (best quality)
+      Logger.info('Step 2: Selecting best face...');
       final face = _selectBestFace(faces);
       if (face == null) {
-        Logger.warning('No suitable face found for encoding');
+        Logger.warning('No suitable face found for encoding - returning null');
         return null;
       }
+
+      Logger.success('Selected face with quality: ${face.qualityScore}');
 
       // Convert camera image to processable format
+      Logger.info('Step 3: Converting camera image to processable format...');
+      final conversionStopwatch = Stopwatch()..start();
       final image = FaceProcessingUtils.convertCameraImage(cameraImage);
+      conversionStopwatch.stop();
+
+      Logger.info('Image conversion completed in ${conversionStopwatch.elapsedMilliseconds}ms');
+
       if (image == null) {
-        Logger.error('Failed to convert camera image');
+        Logger.error('Failed to convert camera image - returning null');
         return null;
       }
+
+      Logger.success('Converted image dimensions: ${image.width}x${image.height}');
 
       // Crop and process the face
+      Logger.info('Step 4: Processing face image...');
+      final processingStopwatch = Stopwatch()..start();
       final processedFace = await _processFaceImage(image, face);
+      processingStopwatch.stop();
+
+      Logger.info('Face processing completed in ${processingStopwatch.elapsedMilliseconds}ms');
+
       if (processedFace == null) {
-        Logger.error('Failed to process face image');
+        Logger.error('Failed to process face image - returning null');
         return null;
       }
+
+      Logger.success('Processed face dimensions: ${processedFace.width}x${processedFace.height}');
 
       // Extract embedding
+      Logger.info('Step 5: Extracting face embedding...');
+      final embeddingStopwatch = Stopwatch()..start();
       final embedding = await _extractEmbedding(processedFace);
+      embeddingStopwatch.stop();
+
+      Logger.info('Embedding extraction completed in ${embeddingStopwatch.elapsedMilliseconds}ms');
+
       if (embedding == null) {
-        Logger.error('Failed to extract face embedding');
+        Logger.error('Failed to extract face embedding - returning null');
         return null;
       }
 
+      Logger.success('Extracted embedding length: ${embedding.length}');
+
       final processingTime = DateTime.now().difference(startTime);
-      Logger.performance(
-        'Face encoding extracted',
-        duration: processingTime,
-      );
+      final quality = FaceProcessingUtils.calculateFaceQuality(face, processedFace);
+
+      Logger.success('ENCODING SUCCESS - Total time: ${processingTime.inMilliseconds}ms');
+      Logger.info('Final quality score: $quality');
+      Logger.info('>>> FaceEncodingService.extractFromCameraImage END <<<');
 
       return FaceEncodingResult(
         embedding: embedding,
         face: face,
-        quality: FaceProcessingUtils.calculateFaceQuality(face, processedFace),
+        quality: quality,
         processingTime: processingTime,
       );
     } catch (e) {
       Logger.error('Face encoding extraction failed', error: e);
+      Logger.info('>>> FaceEncodingService.extractFromCameraImage END (ERROR) <<<');
       return null;
     } finally {
       _isProcessing = false;

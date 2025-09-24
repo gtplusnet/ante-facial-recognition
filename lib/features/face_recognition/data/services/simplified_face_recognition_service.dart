@@ -84,50 +84,102 @@ class SimplifiedFaceRecognitionService {
     CameraImage frame,
     CameraDescription cameraDescription,
   ) async {
+    Logger.info('>>> SimplifiedFaceRecognitionService.processFrame START <<<');
+    Logger.info('Service initialized: $_isInitialized');
+    Logger.info('Total employees: ${_employees.length}');
+    Logger.info('Total encodings: ${_encodings.length}');
+    Logger.info('Quality threshold: $_qualityThreshold');
+    Logger.info('Confidence threshold: $_confidenceThreshold');
+
     if (!_isInitialized) {
+      Logger.error('Service not initialized - throwing exception');
       throw Exception('Service not initialized');
     }
 
     if (_encodings.isEmpty) {
+      Logger.warning('No encodings available - returning noEmployees');
       return const FaceRecognitionResult.noEmployees();
     }
 
     try {
-      Logger.debug('Processing frame for face recognition');
+      final frameStopwatch = Stopwatch()..start();
+
+      Logger.info('Processing frame for face recognition');
 
       // Extract face encoding from frame
+      Logger.info('Step 1: Extracting face encoding from camera image...');
+      final encodingStopwatch = Stopwatch()..start();
       final encodingResult = await _faceEncodingService.extractFromCameraImage(
         frame,
         cameraDescription,
       );
+      encodingStopwatch.stop();
+
+      Logger.info('Face encoding extraction completed in ${encodingStopwatch.elapsedMilliseconds}ms');
 
       if (encodingResult == null) {
+        Logger.info('No face encoding result - returning noFace');
         return const FaceRecognitionResult.noFace();
       }
 
+      Logger.success('Face encoding extracted successfully');
+      Logger.info('Encoding quality: ${encodingResult.quality}');
+      Logger.info('Encoding face bounds: ${encodingResult.face.bounds.left}, ${encodingResult.face.bounds.top}, ${encodingResult.face.bounds.width}x${encodingResult.face.bounds.height}');
+      Logger.info('Embedding length: ${encodingResult.embedding.length}');
+
       // Check face quality
+      Logger.info('Step 2: Checking face quality...');
       if (encodingResult.quality < _qualityThreshold) {
+        final message = _getQualityMessage(encodingResult.quality);
+        Logger.warning('Poor quality detected: ${encodingResult.quality} < $_qualityThreshold');
+        Logger.warning('Quality message: $message');
         return FaceRecognitionResult.poorQuality(
           quality: encodingResult.quality,
-          message: _getQualityMessage(encodingResult.quality),
+          message: message,
         );
       }
 
+      Logger.success('Face quality acceptable: ${encodingResult.quality}');
+
       // Find best match
+      Logger.info('Step 3: Finding best match...');
+      Logger.info('Available employee IDs for matching: ${_encodings.keys.toList()}');
+
+      final matchStopwatch = Stopwatch()..start();
       final matchResult = _faceEncodingService.findBestMatch(
         encodingResult.embedding,
         _encodings,
         threshold: _confidenceThreshold,
       );
+      matchStopwatch.stop();
+
+      Logger.info('Face matching completed in ${matchStopwatch.elapsedMilliseconds}ms');
 
       if (matchResult == null || !matchResult.isMatch) {
+        Logger.warning('No match found or confidence below threshold');
+        if (matchResult != null) {
+          Logger.info('Best match confidence: ${matchResult.confidence}');
+          Logger.info('Best match distance: ${matchResult.distance}');
+          Logger.info('Threshold: $_confidenceThreshold');
+        }
         return const FaceRecognitionResult.unknown();
       }
+
+      Logger.success('Match found!');
+      Logger.info('Matched ID: ${matchResult.matchedId}');
+      Logger.info('Match confidence: ${matchResult.confidence}');
+      Logger.info('Match distance: ${matchResult.distance}');
 
       final employee = _employees[matchResult.matchedId];
       if (employee == null) {
+        Logger.error('Employee not found for matched ID: ${matchResult.matchedId}');
         return const FaceRecognitionResult.unknown();
       }
+
+      frameStopwatch.stop();
+      Logger.success('RECOGNITION SUCCESS: ${employee.name}');
+      Logger.info('Total processing time: ${frameStopwatch.elapsedMilliseconds}ms');
+      Logger.info('>>> SimplifiedFaceRecognitionService.processFrame END <<<');
 
       return FaceRecognitionResult.matched(
         employee: employee,
@@ -136,6 +188,7 @@ class SimplifiedFaceRecognitionService {
       );
     } catch (e) {
       Logger.error('Failed to process frame for face recognition', error: e);
+      Logger.info('>>> SimplifiedFaceRecognitionService.processFrame END (ERROR) <<<');
       return FaceRecognitionResult.error(e.toString());
     }
   }

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -11,7 +12,7 @@ import '../bloc/face_recognition_event.dart';
 
 /// Dialog that appears after successful face recognition
 /// Allows the user to confirm the identity and select an action
-class EmployeeConfirmationDialog extends StatelessWidget {
+class EmployeeConfirmationDialog extends StatefulWidget {
   final Employee employee;
   final double confidence;
   final String? capturedPhoto;
@@ -45,10 +46,45 @@ class EmployeeConfirmationDialog extends StatelessWidget {
   }
 
   @override
+  State<EmployeeConfirmationDialog> createState() => _EmployeeConfirmationDialogState();
+}
+
+class _EmployeeConfirmationDialogState extends State<EmployeeConfirmationDialog> {
+  Timer? _autoDismissTimer;
+  int _countdown = 3;
+
+  @override
+  void initState() {
+    super.initState();
+    _startAutoDismissTimer();
+  }
+
+  @override
+  void dispose() {
+    _autoDismissTimer?.cancel();
+    super.dispose();
+  }
+
+  void _startAutoDismissTimer() {
+    _autoDismissTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      setState(() {
+        _countdown--;
+      });
+
+      if (_countdown <= 0) {
+        timer.cancel();
+        if (mounted) {
+          Navigator.of(context).pop();
+        }
+      }
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isClockingIn = currentStatus == null || 
-        currentStatus?.status == 'clocked_out';
+    final isClockingIn = widget.currentStatus == null ||
+        widget.currentStatus?.status == 'clocked_out';
 
     return Dialog(
       shape: RoundedRectangleBorder(
@@ -60,17 +96,49 @@ class EmployeeConfirmationDialog extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Close button
-            Align(
-              alignment: Alignment.topRight,
-              child: IconButton(
-                onPressed: () => Navigator.of(context).pop(),
-                icon: Icon(
-                  Icons.close,
-                  size: 24.sp,
-                  color: Colors.grey[600],
+            // Close button and countdown
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                // Auto-dismiss countdown
+                Container(
+                  padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 6.h),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(16.r),
+                    border: Border.all(color: Colors.orange.withOpacity(0.3)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.timer,
+                        size: 16.sp,
+                        color: Colors.orange,
+                      ),
+                      SizedBox(width: 4.w),
+                      Text(
+                        'Auto-close: ${_countdown}s',
+                        style: TextStyle(
+                          fontSize: 12.sp,
+                          color: Colors.orange,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
+
+                // Close button
+                IconButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: Icon(
+                    Icons.close,
+                    size: 24.sp,
+                    color: Colors.grey[600],
+                  ),
+                ),
+              ],
             ),
 
             // Employee photo and captured photo side by side
@@ -81,8 +149,8 @@ class EmployeeConfirmationDialog extends StatelessWidget {
                 Column(
                   children: [
                     _ProfileImage(
-                      imageBytes: employee.photoBytes,
-                      imageUrl: employee.photoUrl,
+                      imageBytes: widget.employee.photoBytes,
+                      imageUrl: widget.employee.photoUrl,
                       size: 80.w,
                     ),
                     SizedBox(height: 8.h),
@@ -97,11 +165,11 @@ class EmployeeConfirmationDialog extends StatelessWidget {
                 ),
                 SizedBox(width: 30.w),
                 // Captured photo
-                if (capturedPhoto != null)
+                if (widget.capturedPhoto != null)
                   Column(
                     children: [
                       _ProfileImage(
-                        imageBytes: base64Decode(capturedPhoto!),
+                        imageBytes: base64Decode(widget.capturedPhoto!),
                         size: 80.w,
                       ),
                       SizedBox(height: 8.h),
@@ -120,7 +188,7 @@ class EmployeeConfirmationDialog extends StatelessWidget {
 
             // Employee info
             Text(
-              employee.name,
+              widget.employee.name,
               style: TextStyle(
                 fontSize: 20.sp,
                 fontWeight: FontWeight.bold,
@@ -129,16 +197,16 @@ class EmployeeConfirmationDialog extends StatelessWidget {
             ),
             SizedBox(height: 4.h),
             Text(
-              employee.position ?? 'Employee',
+              widget.employee.position ?? 'Employee',
               style: TextStyle(
                 fontSize: 14.sp,
                 color: Colors.grey[600],
               ),
             ),
-            if (employee.department != null) ...[  
+            if (widget.employee.department != null) ...[
               SizedBox(height: 2.h),
               Text(
-                employee.department!,
+                widget.employee.department!,
                 style: TextStyle(
                   fontSize: 12.sp,
                   color: Colors.grey[500],
@@ -148,11 +216,11 @@ class EmployeeConfirmationDialog extends StatelessWidget {
             SizedBox(height: 16.h),
 
             // Confidence indicator
-            _ConfidenceIndicator(confidence: confidence),
+            _ConfidenceIndicator(confidence: widget.confidence),
             SizedBox(height: 20.h),
 
             // Current status
-            if (currentStatus != null)
+            if (widget.currentStatus != null)
               Container(
                 padding: EdgeInsets.symmetric(
                   horizontal: 16.w,
@@ -190,8 +258,8 @@ class EmployeeConfirmationDialog extends StatelessWidget {
                         Text(
                           _formatTime(
                             isClockingIn 
-                                ? currentStatus!.clockOutTime 
-                                : currentStatus!.clockInTime
+                                ? widget.currentStatus!.clockOutTime 
+                                : widget.currentStatus!.clockInTime
                           ),
                           style: TextStyle(
                             fontSize: 14.sp,
@@ -239,7 +307,7 @@ class EmployeeConfirmationDialog extends StatelessWidget {
                       // Dispatch the appropriate event
                       context.read<FaceRecognitionBloc>().add(
                         ConfirmRecognition(
-                          employeeId: employee.id,
+                          employeeId: widget.employee.id,
                           action: isClockingIn
                               ? RecognitionAction.clockIn
                               : RecognitionAction.clockOut,
@@ -286,7 +354,7 @@ class EmployeeConfirmationDialog extends StatelessWidget {
                 );
               },
               child: Text(
-                'Not ${employee.name.split(' ').first}?',
+                'Not ${widget.employee.name.split(' ').first}?',
                 style: TextStyle(
                   fontSize: 14.sp,
                   color: theme.primaryColor,

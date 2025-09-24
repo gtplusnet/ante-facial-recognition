@@ -1,3 +1,5 @@
+import 'dart:ui' as ui;
+
 import 'package:equatable/equatable.dart';
 
 import '../../../../core/config/face_quality_config.dart';
@@ -90,6 +92,15 @@ class FaceBounds extends Equatable {
     required this.width,
     required this.height,
   });
+
+  factory FaceBounds.fromRect(ui.Rect rect) {
+    return FaceBounds(
+      left: rect.left,
+      top: rect.top,
+      width: rect.width,
+      height: rect.height,
+    );
+  }
 
   double get right => left + width;
   double get bottom => top + height;

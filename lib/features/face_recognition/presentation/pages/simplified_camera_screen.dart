@@ -64,6 +64,8 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
   bool _isFaceDetected = false;
   double _faceQuality = 0.0;
   String _statusMessage = 'Initializing...';
+  bool _isFaceNotRecognized = false;
+  DateTime? _lastRecognitionTime;
   FaceRecognitionStats? _stats;
 
   @override
@@ -377,8 +379,8 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
         _resetErrorState();
       }
 
-      // Trigger face recognition if quality is good
-      if (_faceQuality >= 0.8) {
+      // Trigger face recognition if quality is good and enough time has passed
+      if (_faceQuality >= 0.8 && _canTriggerRecognition()) {
         await _triggerFaceRecognition(image);
       }
 
@@ -400,58 +402,103 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
         _statusMessage = 'Processing face...';
       });
 
+      Logger.info('=== FACE RECOGNITION TRIGGERED ===');
       Logger.info('Face recognition triggered - Quality: ${(_faceQuality * 100).toInt()}%');
+      Logger.info('Can trigger recognition: ${_canTriggerRecognition()}');
+      Logger.info('Last recognition time: $_lastRecognitionTime');
+      Logger.info('Is face not recognized: $_isFaceNotRecognized');
 
       // Process frame using simplified service
       final cameraDescription = _cameraController?.description;
-      if (cameraDescription == null) return;
+      if (cameraDescription == null) {
+        Logger.error('Camera description is null, cannot process frame');
+        return;
+      }
 
+      Logger.info('Camera description: ${cameraDescription.name}, lens: ${cameraDescription.lensDirection}');
+      Logger.info('Image dimensions: ${image.width}x${image.height}, format: ${image.format.group}');
+
+      final stopwatch = Stopwatch()..start();
+
+      Logger.info('Calling face recognition service...');
       final result = await _faceRecognitionService.processFrame(image, cameraDescription);
-      if (result == null) return;
+
+      stopwatch.stop();
+      Logger.info('Face recognition service completed in ${stopwatch.elapsedMilliseconds}ms');
+
+      if (result == null) {
+        Logger.warning('Face recognition service returned null result');
+        return;
+      }
+
+      Logger.info('Recognition result type: ${result.type}');
+      Logger.info('Recognition result confidence: ${result.confidence}');
+      Logger.info('Recognition result quality: ${result.quality}');
+      Logger.info('Recognition result message: ${result.message}');
+      if (result.employee != null) {
+        Logger.info('Recognized employee: ${result.employee!.name} (ID: ${result.employee!.id})');
+      }
 
       // Handle different result types
+      Logger.info('=== PROCESSING RECOGNITION RESULT ===');
       switch (result.type) {
         case FaceRecognitionResultType.matched:
+          Logger.success('MATCH FOUND: ${result.employee?.name}');
           if (result.employee != null) {
-            _showSuccessDialog(result.employee!, result.confidence ?? 0.0);
+            Logger.info('Showing success dialog for: ${result.employee!.name}');
             setState(() {
               _statusMessage = 'Welcome, ${result.employee!.name}!';
+              _isFaceNotRecognized = false; // Reset unrecognized state
+              _lastRecognitionTime = DateTime.now();
             });
+            _showSuccessDialog(result.employee!, result.confidence ?? 0.0);
           }
           break;
 
         case FaceRecognitionResultType.unknown:
-          _showSnackBar('Face not recognized', Colors.red);
+          Logger.warning('UNKNOWN FACE: Face not recognized in database');
           setState(() {
             _statusMessage = 'Face not recognized';
+            _isFaceNotRecognized = true;
+            _lastRecognitionTime = DateTime.now();
           });
+          _showUnrecognizedFaceOverlay();
           break;
 
         case FaceRecognitionResultType.poorQuality:
+          Logger.warning('POOR QUALITY: ${result.message}');
           setState(() {
             _statusMessage = result.message ?? 'Poor face quality';
+            _isFaceNotRecognized = false; // Reset unrecognized state
           });
           break;
 
         case FaceRecognitionResultType.noFace:
+          Logger.debug('NO FACE: No face detected in image');
           setState(() {
             _statusMessage = 'No face detected';
+            _isFaceNotRecognized = false; // Reset unrecognized state
           });
           break;
 
         case FaceRecognitionResultType.noEmployees:
+          Logger.error('NO EMPLOYEES: No employees loaded for matching');
           setState(() {
             _statusMessage = 'No employees loaded';
+            _isFaceNotRecognized = false; // Reset unrecognized state
           });
           break;
 
         case FaceRecognitionResultType.error:
+          Logger.error('RECOGNITION ERROR: ${result.message}');
           _showSnackBar(result.message ?? 'Recognition error', Colors.red);
           setState(() {
             _statusMessage = 'Recognition error occurred';
+            _isFaceNotRecognized = false; // Reset unrecognized state
           });
           break;
       }
+      Logger.info('=== RECOGNITION RESULT PROCESSING COMPLETE ===');
     } catch (e) {
       _handleProcessingError('Face recognition', e);
     }
@@ -464,6 +511,21 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
       confidence: confidence,
       currentStatus: null,
     );
+  }
+
+  /// Check if enough time has passed since the last recognition to allow a new one
+  bool _canTriggerRecognition() {
+    if (_lastRecognitionTime == null) return true;
+
+    final timeSinceLastRecognition = DateTime.now().difference(_lastRecognitionTime!);
+
+    // Allow new recognition after 5 seconds for successful matches
+    // Allow new recognition after 3 seconds for failed matches
+    final cooldownDuration = _isFaceNotRecognized
+        ? const Duration(seconds: 3)
+        : const Duration(seconds: 5);
+
+    return timeSinceLastRecognition >= cooldownDuration;
   }
 
 
@@ -645,6 +707,9 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
             // Quality indicator overlay
             _buildQualityIndicator(),
 
+            // Unrecognized face overlay
+            _buildUnrecognizedFaceOverlay(),
+
             // Top bar
             _buildTopBar(),
 
@@ -798,6 +863,130 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
           ),
       ],
     );
+  }
+
+  Widget _buildUnrecognizedFaceOverlay() {
+    if (!_isFaceNotRecognized) {
+      return const SizedBox.shrink();
+    }
+
+    return Positioned.fill(
+      child: IgnorePointer(
+        child: Container(
+          decoration: BoxDecoration(
+            border: Border.all(
+              color: Colors.red.withOpacity(0.8),
+              width: 4.0,
+            ),
+          ),
+          child: Stack(
+            children: [
+              // Red overlay with opacity
+              Container(
+                color: Colors.red.withOpacity(0.1),
+              ),
+
+              // Center message
+              Center(
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 300),
+                  padding: EdgeInsets.symmetric(horizontal: 24.w, vertical: 16.h),
+                  decoration: BoxDecoration(
+                    color: Colors.red.withOpacity(0.9),
+                    borderRadius: BorderRadius.circular(12.r),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.red.withOpacity(0.3),
+                        blurRadius: 12,
+                        spreadRadius: 2,
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.person_off,
+                        color: Colors.white,
+                        size: 48.sp,
+                      ),
+                      SizedBox(height: 12.h),
+                      Text(
+                        'Face Not Recognized',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18.sp,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      SizedBox(height: 8.h),
+                      Text(
+                        'Please try again or contact administrator',
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.9),
+                          fontSize: 14.sp,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              // Scanning animation indicator
+              Positioned(
+                bottom: MediaQuery.of(context).size.height * 0.2,
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: Container(
+                    padding: EdgeInsets.symmetric(horizontal: 16.w, vertical: 8.h),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.9),
+                      borderRadius: BorderRadius.circular(20.r),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(
+                          width: 16.w,
+                          height: 16.h,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor: AlwaysStoppedAnimation<Color>(Colors.red),
+                          ),
+                        ),
+                        SizedBox(width: 8.w),
+                        Text(
+                          'Retrying...',
+                          style: TextStyle(
+                            color: Colors.red,
+                            fontSize: 12.sp,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showUnrecognizedFaceOverlay() {
+    // Auto-hide the overlay after 3 seconds
+    Timer(const Duration(seconds: 3), () {
+      if (mounted) {
+        setState(() {
+          _isFaceNotRecognized = false;
+        });
+      }
+    });
   }
 
   Widget _buildTopBar() {
