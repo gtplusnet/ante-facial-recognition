@@ -264,7 +264,7 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
 
       _cameraController = CameraController(
         camera,
-        ResolutionPreset.max, // Using max resolution for best quality
+        ResolutionPreset.high, // Using high resolution for better compatibility
         enableAudio: false,
         imageFormatGroup: ImageFormatGroup.yuv420, // Force consistent format
       );
