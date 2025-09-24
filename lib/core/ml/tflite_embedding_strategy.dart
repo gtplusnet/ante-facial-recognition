@@ -48,9 +48,13 @@ class TFLiteEmbeddingStrategy implements EmbeddingStrategy {
       // Load model from assets with detailed validation
       Logger.debug('Loading model from path: $modelPath');
       final modelData = await rootBundle.load(modelPath);
-      final buffer = modelData.buffer.asUint8List(
-        modelData.offsetInBytes,
-        modelData.lengthInBytes,
+
+      // Create a clean copy of the buffer without any offset issues
+      final buffer = Uint8List.fromList(
+        modelData.buffer.asUint8List(
+          modelData.offsetInBytes,
+          modelData.lengthInBytes,
+        ),
       );
 
       Logger.debug('Model buffer loaded: ${buffer.length} bytes');
@@ -76,18 +80,35 @@ class TFLiteEmbeddingStrategy implements EmbeddingStrategy {
       await _tryEnableGpuDelegate(options);
 
       // Create interpreter with detailed error handling
-      Logger.debug('Creating interpreter from buffer...');
+      Logger.debug('Creating interpreter...');
       try {
-        _interpreter = Interpreter.fromBuffer(buffer, options: options);
-        Logger.debug('Interpreter created successfully');
+        // First try loading from asset path directly
+        try {
+          Logger.debug('Attempting to load from asset path directly...');
+          _interpreter = await Interpreter.fromAsset(modelPath, options: options);
+          Logger.debug('Interpreter created successfully from asset path');
+        } catch (assetError) {
+          Logger.warning('Asset loading failed: $assetError, trying buffer method...');
+          // Fall back to buffer method
+          _interpreter = Interpreter.fromBuffer(buffer, options: options);
+          Logger.debug('Interpreter created successfully from buffer');
+        }
       } catch (interpreterError) {
         Logger.error('Interpreter creation failed: $interpreterError');
 
         // Try without GPU delegate as fallback
         Logger.info('Retrying without GPU delegate...');
         final cpuOptions = InterpreterOptions();
-        _interpreter = Interpreter.fromBuffer(buffer, options: cpuOptions);
-        Logger.success('Interpreter created successfully with CPU-only mode');
+
+        try {
+          // Try asset path first
+          _interpreter = await Interpreter.fromAsset(modelPath, options: cpuOptions);
+          Logger.success('Interpreter created successfully with CPU-only mode (asset)');
+        } catch (e) {
+          // Fall back to buffer
+          _interpreter = Interpreter.fromBuffer(buffer, options: cpuOptions);
+          Logger.success('Interpreter created successfully with CPU-only mode (buffer)');
+        }
       }
 
       // Get input and output shapes

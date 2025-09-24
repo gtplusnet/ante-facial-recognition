@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../features/authentication/presentation/pages/device_setup_page.dart';
 import '../../features/employee/presentation/pages/employee_list_page.dart';
 import '../../features/face_recognition/presentation/pages/simplified_camera_screen.dart';
+import '../../features/logs/presentation/pages/face_recognition_logs_page.dart';
 import '../../features/main_shell/presentation/pages/main_shell_page.dart';
 import '../../features/settings/presentation/pages/settings_page.dart';
 import '../../features/splash/presentation/pages/splash_page.dart';
@@ -14,10 +15,15 @@ class AppRouter {
   static final GlobalKey<NavigatorState> _shellNavigatorKey =
       GlobalKey<NavigatorState>(debugLabel: 'shell');
 
+  // Route observer for tracking navigation
+  static final RouteObserver<ModalRoute<void>> routeObserver =
+      RouteObserver<ModalRoute<void>>();
+
   static final GoRouter router = GoRouter(
     navigatorKey: _rootNavigatorKey,
     initialLocation: '/',
     debugLogDiagnostics: true,
+    observers: [routeObserver],
     routes: [
       GoRoute(
         path: '/',
@@ -57,10 +63,7 @@ class AppRouter {
               GoRoute(
                 path: '/daily-logs',
                 name: 'dailyLogs',
-                builder: (context, state) => const MainShellScaffold(
-                  title: 'Daily Logs',
-                  child: Center(child: Text('Daily Logs Screen')),
-                ),
+                builder: (context, state) => const FaceRecognitionLogsPage(),
               ),
             ],
           ),

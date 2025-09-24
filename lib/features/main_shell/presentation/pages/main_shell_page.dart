@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:go_router/go_router.dart';
 
-class MainShellPage extends StatelessWidget {
+class MainShellPage extends StatefulWidget {
   final StatefulNavigationShell navigationShell;
 
   const MainShellPage({
@@ -11,17 +11,39 @@ class MainShellPage extends StatelessWidget {
   });
 
   @override
+  State<MainShellPage> createState() => _MainShellPageState();
+}
+
+class _MainShellPageState extends State<MainShellPage> {
+  int _previousIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _previousIndex = widget.navigationShell.currentIndex;
+  }
+
+  void _onDestinationSelected(int index) {
+    // Notify about navigation change
+    if (_previousIndex == 0 && index != 0) {
+      // Navigating away from Recognition tab (index 0)
+      // This will be handled by the visibility detector in SimplifiedCameraScreen
+    }
+    _previousIndex = index;
+
+    widget.navigationShell.goBranch(
+      index,
+      initialLocation: index == widget.navigationShell.currentIndex,
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: navigationShell,
+      body: widget.navigationShell,
       bottomNavigationBar: NavigationBar(
-        selectedIndex: navigationShell.currentIndex,
-        onDestinationSelected: (index) {
-          navigationShell.goBranch(
-            index,
-            initialLocation: index == navigationShell.currentIndex,
-          );
-        },
+        selectedIndex: widget.navigationShell.currentIndex,
+        onDestinationSelected: _onDestinationSelected,
         destinations: [
           NavigationDestination(
             icon: Icon(Icons.face_outlined, size: 24.w),

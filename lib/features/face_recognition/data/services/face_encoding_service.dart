@@ -160,10 +160,14 @@ class FaceEncodingService {
 
       Logger.success('Selected face with quality: ${face.qualityScore}');
 
-      // Convert camera image to processable format
+      // Convert camera image to processable format with rotation
       Logger.info('Step 3: Converting camera image to processable format...');
       final conversionStopwatch = Stopwatch()..start();
-      final image = FaceProcessingUtils.convertCameraImage(cameraImage);
+      // Pass sensor orientation for proper rotation (270 for front camera)
+      final image = FaceProcessingUtils.convertCameraImage(
+        cameraImage,
+        sensorOrientation: cameraDescription.sensorOrientation,
+      );
       conversionStopwatch.stop();
 
       Logger.info('Image conversion completed in ${conversionStopwatch.elapsedMilliseconds}ms');
@@ -206,7 +210,8 @@ class FaceEncodingService {
       Logger.success('Extracted embedding length: ${embedding.length}');
 
       final processingTime = DateTime.now().difference(startTime);
-      final quality = FaceProcessingUtils.calculateFaceQuality(face, processedFace);
+      // Use the original face quality score from detection, not recalculated from processed image
+      final quality = face.qualityScore;
 
       Logger.success('ENCODING SUCCESS - Total time: ${processingTime.inMilliseconds}ms');
       Logger.info('Final quality score: $quality');

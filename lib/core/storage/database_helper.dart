@@ -12,7 +12,7 @@ class DatabaseHelper {
   DatabaseHelper();
 
   static const String _databaseName = 'ante_facial_recognition.db';
-  static const int _databaseVersion = 1;
+  static const int _databaseVersion = 2; // Incremented for timestamp column migration
 
   Future<Database> get database async {
     if (_database != null) return _database!;
@@ -62,12 +62,23 @@ class DatabaseHelper {
     await db.execute('''
       CREATE TABLE IF NOT EXISTS face_recognition_logs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        timestamp TEXT NOT NULL,
+        result_type TEXT NOT NULL,
         employee_id TEXT,
-        confidence REAL NOT NULL,
-        recognition_time INTEGER NOT NULL,
-        success INTEGER NOT NULL,
+        employee_name TEXT,
+        confidence REAL,
+        quality REAL,
+        processing_time_ms INTEGER NOT NULL,
+        face_bounds TEXT,
+        face_image BLOB,
+        thumbnail_image BLOB,
+        image_width INTEGER,
+        image_height INTEGER,
         error_message TEXT,
-        created_at TEXT NOT NULL
+        metadata TEXT,
+        device_id TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT
       )
     ''');
 
@@ -94,8 +105,105 @@ class DatabaseHelper {
 
     // Handle database migrations here
     if (oldVersion < 2) {
-      // Example migration for version 2
-      // await db.execute('ALTER TABLE employees ADD COLUMN email TEXT');
+      // Migration for version 2: Add timestamp column to face_recognition_logs if it doesn't exist
+      Logger.database('Migrating to version 2: Checking face_recognition_logs table...');
+
+      try {
+        // Check if the timestamp column exists
+        final tableInfo = await db.rawQuery('PRAGMA table_info(face_recognition_logs)');
+        final hasTimestamp = tableInfo.any((column) => column['name'] == 'timestamp');
+
+        if (!hasTimestamp) {
+          Logger.database('Adding timestamp column to face_recognition_logs table...');
+
+          // Since SQLite doesn't support adding NOT NULL columns without default values,
+          // we need to recreate the table
+          await db.execute('DROP TABLE IF EXISTS face_recognition_logs_backup');
+
+          // Create a backup table with the new schema
+          await db.execute('''
+            CREATE TABLE face_recognition_logs_backup (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              timestamp TEXT NOT NULL,
+              result_type TEXT NOT NULL,
+              employee_id TEXT,
+              employee_name TEXT,
+              confidence REAL,
+              quality REAL,
+              processing_time_ms INTEGER NOT NULL,
+              face_bounds TEXT,
+              face_image BLOB,
+              thumbnail_image BLOB,
+              image_width INTEGER,
+              image_height INTEGER,
+              error_message TEXT,
+              metadata TEXT,
+              device_id TEXT,
+              created_at TEXT NOT NULL,
+              updated_at TEXT
+            )
+          ''');
+
+          // Check if old table exists and has data
+          final oldTableExists = tableInfo.isNotEmpty;
+          if (oldTableExists) {
+            // Copy data from old table to new table, using created_at as timestamp if needed
+            await db.execute('''
+              INSERT INTO face_recognition_logs_backup
+              SELECT id,
+                     COALESCE(created_at, datetime('now')) as timestamp,
+                     result_type, employee_id, employee_name, confidence, quality,
+                     processing_time_ms, face_bounds, face_image, thumbnail_image,
+                     image_width, image_height, error_message, metadata, device_id,
+                     created_at, created_at as updated_at
+              FROM face_recognition_logs
+            ''');
+
+            // Drop old table
+            await db.execute('DROP TABLE face_recognition_logs');
+          }
+
+          // Rename backup table to original name
+          await db.execute('ALTER TABLE face_recognition_logs_backup RENAME TO face_recognition_logs');
+
+          Logger.database('Successfully added timestamp column to face_recognition_logs table');
+        } else {
+          Logger.database('Timestamp column already exists in face_recognition_logs table');
+        }
+      } catch (e) {
+        Logger.error('Failed to migrate face_recognition_logs table', error: e);
+
+        // As a fallback, recreate the table with the correct schema
+        Logger.database('Recreating face_recognition_logs table with correct schema...');
+
+        // Drop the old table completely
+        await db.execute('DROP TABLE IF EXISTS face_recognition_logs');
+
+        // Create the new table with proper schema
+        await db.execute('''
+          CREATE TABLE face_recognition_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            result_type TEXT NOT NULL,
+            employee_id TEXT,
+            employee_name TEXT,
+            confidence REAL,
+            quality REAL,
+            processing_time_ms INTEGER NOT NULL,
+            face_bounds TEXT,
+            face_image BLOB,
+            thumbnail_image BLOB,
+            image_width INTEGER,
+            image_height INTEGER,
+            error_message TEXT,
+            metadata TEXT,
+            device_id TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT
+          )
+        ''');
+        Logger.database('Successfully recreated face_recognition_logs table with timestamp column');
+      }
     }
   }
 

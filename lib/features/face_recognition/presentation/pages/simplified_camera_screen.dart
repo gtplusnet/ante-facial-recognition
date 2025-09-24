@@ -1,18 +1,24 @@
 import 'dart:async';
+import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
+import 'package:google_mlkit_commons/google_mlkit_commons.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
+import 'package:visibility_detector/visibility_detector.dart';
 
 import '../../../../core/di/injection.dart';
 import '../../../../core/platform/render_aware_widget.dart';
+import '../../../../core/router/app_router.dart';
 import '../../../../core/utils/logger.dart';
 import '../../../employee/domain/entities/employee.dart';
 import '../../../employee/presentation/bloc/employee_bloc.dart';
 import '../../../employee/presentation/bloc/employee_event.dart' as employee_events;
+import '../../../logs/data/services/face_recognition_log_service.dart';
 import '../../data/services/simplified_face_recognition_service.dart';
 import '../widgets/employee_confirmation_dialog.dart';
 
@@ -26,18 +32,25 @@ class SimplifiedCameraScreen extends StatefulWidget {
 }
 
 class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, RouteAware {
   // Camera and face detection
   CameraController? _cameraController;
   final FaceDetector _faceDetector = FaceDetector(
     options: FaceDetectorOptions(
-      performanceMode: FaceDetectorMode.fast,
-      minFaceSize: 0.2,
+      performanceMode: FaceDetectorMode.accurate, // Changed to accurate mode for better detection
+      enableClassification: true,
+      enableContours: true,
+      enableTracking: true,
+      enableLandmarks: true, // Added landmarks for better feature detection
+      minFaceSize: 0.05, // Further reduced to 5% to detect very small faces
     ),
   );
 
   // Face recognition service
   late final SimplifiedFaceRecognitionService _faceRecognitionService;
+
+  // Face recognition log service
+  late final FaceRecognitionLogService _logService;
 
   // Processing control
   bool _isProcessing = false;
@@ -47,6 +60,7 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
 
   // Frame management
   int _frameDropCount = 0;
+  int _frameCounter = 0;
   static const int _maxFrameDrops = 5;
 
   // Error handling and retry logic
@@ -67,6 +81,10 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
   bool _isFaceNotRecognized = false;
   DateTime? _lastRecognitionTime;
   FaceRecognitionStats? _stats;
+  bool _mlKitError = false;
+
+  // Face detection for logging
+  List<Face>? _detectedFaces;
 
   @override
   void initState() {
@@ -75,6 +93,9 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
 
     // Initialize face recognition service
     _faceRecognitionService = getIt<SimplifiedFaceRecognitionService>();
+
+    // Initialize log service
+    _logService = getIt<FaceRecognitionLogService>();
 
     // Initialize services
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -88,11 +109,48 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
   @override
   void dispose() {
     _isDisposing = true;
+    AppRouter.routeObserver.unsubscribe(this);
     WidgetsBinding.instance.removeObserver(this);
     _disposeCamera();
     _faceDetector.close();
     _restoreSystemUI();
     super.dispose();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Subscribe to route observer
+    AppRouter.routeObserver.subscribe(this, ModalRoute.of(context) as ModalRoute<void>);
+  }
+
+  // RouteAware methods
+  @override
+  void didPush() {
+    // Called when this route has been pushed
+    Logger.info('SimplifiedCameraScreen route pushed');
+  }
+
+  @override
+  void didPopNext() {
+    // Called when the route above this one has been popped off
+    Logger.info('SimplifiedCameraScreen became visible - resuming camera');
+    if (!_isDisposing && mounted) {
+      _initializeCamera();
+    }
+  }
+
+  @override
+  void didPushNext() {
+    // Called when a new route has been pushed on top of this one
+    Logger.info('SimplifiedCameraScreen hidden by new route - pausing camera');
+    _safePauseCamera();
+  }
+
+  @override
+  void didPop() {
+    // Called when this route has been popped off
+    Logger.info('SimplifiedCameraScreen route popped');
   }
 
   @override
@@ -173,19 +231,27 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
         return;
       }
 
+      // Log all available cameras
+      Logger.info('Available cameras: ${cameras.length}');
+      for (int i = 0; i < cameras.length; i++) {
+        Logger.info('Camera $i: ${cameras[i].name}, Direction: ${cameras[i].lensDirection}, Orientation: ${cameras[i].sensorOrientation}');
+      }
+
       // Use front camera
       final camera = cameras.firstWhere(
         (c) => c.lensDirection == CameraLensDirection.front,
         orElse: () => cameras.first,
       );
 
-      Logger.info('Initializing camera: ${camera.name}');
+      final cameraIndex = cameras.indexOf(camera);
+      Logger.info('Selected camera index: $cameraIndex');
+      Logger.info('Selected camera: ${camera.name}, Direction: ${camera.lensDirection}, Orientation: ${camera.sensorOrientation}');
 
       _cameraController = CameraController(
         camera,
-        ResolutionPreset.medium, // Use medium for better performance
+        ResolutionPreset.max, // Using max resolution for best quality
         enableAudio: false,
-        imageFormatGroup: ImageFormatGroup.nv21, // Required for ML Kit face detection
+        // Removed imageFormatGroup to let camera choose optimal format
       );
 
       await _cameraController!.initialize();
@@ -216,10 +282,22 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
   }
 
   void _startImageStream() {
-    if (_isDisposing || _cameraController?.value.isInitialized != true) return;
+    Logger.info('=== STARTING IMAGE STREAM ===');
+
+    if (_isDisposing) {
+      Logger.warning('Cannot start stream - widget is disposing');
+      return;
+    }
+
+    if (_cameraController?.value.isInitialized != true) {
+      Logger.warning('Cannot start stream - camera not initialized');
+      return;
+    }
 
     try {
+      Logger.info('Calling startImageStream on camera controller...');
       _cameraController!.startImageStream((CameraImage image) {
+        Logger.debug('Camera frame received: ${image.width}x${image.height}, format: ${image.format.group}');
         // Comprehensive lifecycle and disposal checks
         if (_isDisposing ||
             !mounted ||
@@ -262,6 +340,7 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
           }
         });
       });
+      Logger.success('Camera stream started successfully');
     } catch (e) {
       Logger.error('Failed to start image stream', error: e);
       _showSnackBar('Failed to start camera stream', Colors.red);
@@ -326,11 +405,15 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
   }
 
   Future<void> _processFrame(CameraImage image) async {
+    Logger.debug('Processing frame...');
+    _frameCounter++;
+
     // Enhanced verification with disposal check
     if (_isDisposing ||
         !mounted ||
         _cameraController?.value.isInitialized != true ||
         _cameraController?.value.isStreamingImages != true) {
+      Logger.warning('Skipping frame processing - widget state not ready');
       return;
     }
 
@@ -340,31 +423,61 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
     }
 
     try {
-      // TEMPORARY: Simulate face detection for testing quality indicator
-      // This will cycle through different quality levels every few seconds
-      final now = DateTime.now();
-      final seconds = now.second;
+      // Convert CameraImage to InputImage for ML Kit
+      final inputImage = _createInputImageFromCamera(image);
+      if (inputImage == null) {
+        Logger.warning('Failed to create InputImage from CameraImage');
+        return;
+      }
 
-      // Simulate face detection based on time
+      // Detect faces using ML Kit
+      List<Face> faces = [];
+      try {
+        Logger.debug('Calling ML Kit face detector...');
+        Logger.debug('InputImage metadata: size=${inputImage.metadata?.size}, '
+                     'rotation=${inputImage.metadata?.rotation}, '
+                     'format=${inputImage.metadata?.format}, '
+                     'bytesPerRow=${inputImage.metadata?.bytesPerRow}');
+
+        faces = await _faceDetector.processImage(inputImage);
+        Logger.info('ML Kit detected ${faces.length} face(s)');
+
+        // Log face details if detected
+        if (faces.isNotEmpty) {
+          for (int i = 0; i < faces.length; i++) {
+            final face = faces[i];
+            Logger.info('Face $i: boundingBox=${face.boundingBox}, '
+                       'trackingId=${face.trackingId}, '
+                       'headEulerAngleY=${face.headEulerAngleY}, '
+                       'headEulerAngleZ=${face.headEulerAngleZ}');
+          }
+        }
+
+        _mlKitError = false; // Reset error flag on success
+      } catch (mlKitError) {
+        Logger.warning('ML Kit face detection error: $mlKitError');
+        // Even if ML Kit fails, we still want to log the attempt
+        // Set empty faces list so logging knows there was no face detected
+        faces = [];
+        _mlKitError = true; // Set error flag
+      }
+
+      // Store detected faces for logging
+      _detectedFaces = faces;
+
       final wasDetected = _isFaceDetected;
       final oldQuality = _faceQuality;
 
-      if (seconds % 10 < 3) {
-        // First 3 seconds: No face
+      if (faces.isEmpty) {
         _isFaceDetected = false;
         _faceQuality = 0.0;
-      } else if (seconds % 10 < 6) {
-        // Next 3 seconds: Poor quality face
-        _isFaceDetected = true;
-        _faceQuality = 0.4;
-      } else if (seconds % 10 < 9) {
-        // Next 3 seconds: Medium quality face
-        _isFaceDetected = true;
-        _faceQuality = 0.7;
+        Logger.debug('No face detected in frame');
       } else {
-        // Last 1 second: High quality face (90%+)
+        // Use the first (largest) face for quality calculation
+        final face = faces.first;
         _isFaceDetected = true;
-        _faceQuality = 0.95;
+        _faceQuality = _calculateFaceQuality(face, image);
+        Logger.info('Face detected with quality: ${(_faceQuality * 100).toInt()}%');
       }
 
       // Update UI if state changed significantly
@@ -381,7 +494,10 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
 
       // Trigger face recognition if quality is good and enough time has passed
       if (_faceQuality >= 0.8 && _canTriggerRecognition()) {
+        Logger.success('🎯 Quality threshold met: ${(_faceQuality * 100).toInt()}% >= 80%');
         await _triggerFaceRecognition(image);
+      } else if (_faceQuality >= 0.7 && _frameCounter % 30 == 0) {
+        Logger.debug('Quality approaching threshold: ${(_faceQuality * 100).toInt()}%');
       }
 
     } catch (e) {
@@ -406,6 +522,7 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
       Logger.info('Face recognition triggered - Quality: ${(_faceQuality * 100).toInt()}%');
       Logger.info('Can trigger recognition: ${_canTriggerRecognition()}');
       Logger.info('Last recognition time: $_lastRecognitionTime');
+      Logger.info('Starting face encoding extraction...');
       Logger.info('Is face not recognized: $_isFaceNotRecognized');
 
       // Process frame using simplified service
@@ -499,6 +616,12 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
           break;
       }
       Logger.info('=== RECOGNITION RESULT PROCESSING COMPLETE ===');
+
+      // Log the recognition result with images (async, no await to avoid blocking UI)
+      _logRecognitionResult(result, stopwatch.elapsedMilliseconds, image).catchError((e) {
+        Logger.error('Failed to log recognition result', error: e);
+      });
+
     } catch (e) {
       _handleProcessingError('Face recognition', e);
     }
@@ -528,29 +651,223 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
     return timeSinceLastRecognition >= cooldownDuration;
   }
 
+  /// Log recognition result with camera image and detected faces
+  Future<void> _logRecognitionResult(
+    FaceRecognitionResult result,
+    int processingTimeMs,
+    CameraImage cameraImage,
+  ) async {
+    try {
+      Logger.info('Logging face recognition result to database...');
+
+      final cameraDescription = _cameraController?.description;
+      if (cameraDescription == null) {
+        Logger.warning('Camera description is null, cannot log with proper orientation');
+        return;
+      }
+
+      // Create metadata with app context
+      final metadata = <String, dynamic>{
+        'app_version': '1.0.0',
+        'screen': 'simplified_camera_screen',
+        'camera_name': cameraDescription.name,
+        'camera_lens': cameraDescription.lensDirection.name,
+        'image_format': cameraImage.format.group.name,
+        'processed_at': DateTime.now().toIso8601String(),
+      };
+
+      // Log the result with image data
+      await _logService.logRecognitionResult(
+        result: result,
+        processingTimeMs: processingTimeMs,
+        cameraImage: cameraImage,
+        cameraDescription: cameraDescription,
+        detectedFaces: _detectedFaces,
+        deviceId: 'device_${DateTime.now().millisecondsSinceEpoch}', // Simple device ID
+        metadata: metadata,
+      );
+
+      Logger.info('Recognition result logged successfully');
+    } catch (e) {
+      Logger.error('Failed to log recognition result', error: e);
+      // Don't rethrow - logging failures should not break the main flow
+    }
+  }
+
+
+  /// Convert YUV420 format to NV21 for ML Kit
+  Uint8List _convertYuv420ToNv21(CameraImage cameraImage) {
+    final int width = cameraImage.width;
+    final int height = cameraImage.height;
+    final int uvRowStride = cameraImage.planes[1].bytesPerRow;
+    final int uvPixelStride = cameraImage.planes[1].bytesPerPixel ?? 1;
+
+    // NV21 format: Y plane followed by interleaved VU plane
+    // Total size = width * height * 3 / 2
+    final nv21 = Uint8List((width * height * 3) ~/ 2);
+
+    // Copy Y plane directly (assuming it's already properly formatted)
+    final yPlane = cameraImage.planes[0].bytes;
+    final ySize = width * height;
+
+    // Copy Y data
+    for (int i = 0; i < ySize && i < yPlane.length; i++) {
+      nv21[i] = yPlane[i];
+    }
+
+    // Interleave U and V planes (note: NV21 format is V then U, not U then V)
+    final uPlane = cameraImage.planes[1].bytes;
+    final vPlane = cameraImage.planes[2].bytes;
+
+    int nv21Index = width * height;
+    for (int i = 0; i < height ~/ 2; i++) {
+      for (int j = 0; j < width ~/ 2; j++) {
+        final int uvIndex = i * uvRowStride + j * uvPixelStride;
+
+        // Make sure we don't go out of bounds
+        if (uvIndex < vPlane.length && uvIndex < uPlane.length && nv21Index + 1 < nv21.length) {
+          nv21[nv21Index++] = vPlane[uvIndex];  // V first
+          nv21[nv21Index++] = uPlane[uvIndex];  // U second
+        }
+      }
+    }
+
+    return nv21;
+  }
+
+  /// Create InputImage from CameraImage for ML Kit processing
+  InputImage? _createInputImageFromCamera(CameraImage cameraImage) {
+    try {
+      final cameraDescription = _cameraController?.description;
+      if (cameraDescription == null) return null;
+
+      // Log camera image details for debugging
+      Logger.info('CameraImage format: ${cameraImage.format.group.name}, '
+                  'planes: ${cameraImage.planes.length}, '
+                  'dimensions: ${cameraImage.width}x${cameraImage.height}');
+      Logger.debug('Camera sensor orientation: ${cameraDescription.sensorOrientation}, '
+                   'lens direction: ${cameraDescription.lensDirection}');
+
+      // Get image orientation - Android front camera typically needs special handling
+      final sensorOrientation = cameraDescription.sensorOrientation;
+      InputImageRotation rotation;
+
+      // For Android devices in portrait mode
+      if (cameraDescription.lensDirection == CameraLensDirection.front) {
+        // Front camera - mirror and rotate
+        switch (sensorOrientation) {
+          case 0:
+            rotation = InputImageRotation.rotation0deg;
+            break;
+          case 90:
+            rotation = InputImageRotation.rotation90deg;
+            break;
+          case 180:
+            rotation = InputImageRotation.rotation180deg;
+            break;
+          case 270:
+            rotation = InputImageRotation.rotation270deg;
+            break;
+          default:
+            rotation = InputImageRotation.rotation0deg;
+            Logger.warning('Unknown sensor orientation: $sensorOrientation, using 0deg');
+        }
+      } else {
+        // Back camera
+        switch (sensorOrientation) {
+          case 0:
+            rotation = InputImageRotation.rotation0deg;
+            break;
+          case 90:
+            rotation = InputImageRotation.rotation90deg;
+            break;
+          case 180:
+            rotation = InputImageRotation.rotation180deg;
+            break;
+          case 270:
+            rotation = InputImageRotation.rotation270deg;
+            break;
+          default:
+            rotation = InputImageRotation.rotation0deg;
+            Logger.warning('Unknown sensor orientation: $sensorOrientation, using 0deg');
+        }
+      }
+
+      Logger.debug('Using rotation: $rotation for sensor orientation: $sensorOrientation');
+
+      // Convert image bytes based on format
+      Uint8List imageBytes;
+      if (cameraImage.planes.length > 1) {
+        // YUV420 format with separate planes - convert to NV21
+        Logger.info('Converting YUV420 to NV21 for ML Kit');
+        imageBytes = _convertYuv420ToNv21(cameraImage);
+      } else {
+        // Already in NV21 format or single plane
+        Logger.info('Using single plane bytes directly');
+        imageBytes = cameraImage.planes[0].bytes;
+      }
+
+      // Create InputImage with converted bytes
+      // Calculate bytesPerRow based on the actual plane data
+      // For YUV420 formats, use the Y plane's bytesPerRow
+      final bytesPerRow = cameraImage.planes.isNotEmpty
+          ? cameraImage.planes[0].bytesPerRow
+          : cameraImage.width;
+
+      // Log buffer sizes for debugging
+      Logger.info('Buffer size: ${imageBytes.length}, Expected: ${(cameraImage.width * cameraImage.height * 3) ~/ 2}');
+      Logger.info('Using bytesPerRow: $bytesPerRow from plane (width: ${cameraImage.width})');
+
+      return InputImage.fromBytes(
+        bytes: imageBytes,
+        metadata: InputImageMetadata(
+          size: Size(cameraImage.width.toDouble(), cameraImage.height.toDouble()),
+          rotation: rotation,
+          format: InputImageFormat.nv21, // Always use NV21 after conversion
+          bytesPerRow: bytesPerRow,
+        ),
+      );
+    } catch (e) {
+      Logger.error('Failed to create InputImage from CameraImage', error: e);
+      return null;
+    }
+  }
 
   double _calculateFaceQuality(Face face, CameraImage image) {
     final imageArea = image.width * image.height;
     final faceArea = face.boundingBox.width * face.boundingBox.height;
     final faceRatio = faceArea / imageArea;
 
-    // Size score (ideal: 20-40% of image)
+    // Size score (ideal: 15-50% of image, more lenient)
     double sizeScore = 1.0;
-    if (faceRatio < 0.2) {
-      sizeScore = faceRatio / 0.2;
-    } else if (faceRatio > 0.4) {
-      sizeScore = 0.4 / faceRatio;
+    if (faceRatio < 0.15) {
+      // Gentler penalty for smaller faces
+      sizeScore = math.pow(faceRatio / 0.15, 0.7).toDouble();
+    } else if (faceRatio > 0.5) {
+      // Gentler penalty for larger faces
+      sizeScore = math.pow(0.5 / faceRatio, 0.7).toDouble();
     }
 
-    // Center score
+    // Center score (more forgiving)
     final centerX = image.width / 2;
     final centerY = image.height / 2;
     final faceCenter = face.boundingBox.center;
     final distanceFromCenter = (faceCenter.dx - centerX).abs() / centerX +
                                (faceCenter.dy - centerY).abs() / centerY;
-    final centerScore = (1.0 - distanceFromCenter / 2).clamp(0.0, 1.0);
+    final centerScore = (1.0 - distanceFromCenter / 3).clamp(0.0, 1.0); // Reduced penalty
 
-    return (sizeScore * 0.6 + centerScore * 0.4).clamp(0.0, 1.0);
+    // Give more weight to size score for better UX
+    final quality = (sizeScore * 0.7 + centerScore * 0.3).clamp(0.0, 1.0);
+
+    // Log quality details for debugging
+    if (_frameCounter % 30 == 0) { // Log every 30 frames
+      Logger.debug('Face quality details - Ratio: ${(faceRatio * 100).toStringAsFixed(1)}%, '
+                   'Size score: ${(sizeScore * 100).toStringAsFixed(0)}%, '
+                   'Center score: ${(centerScore * 100).toStringAsFixed(0)}%, '
+                   'Total: ${(quality * 100).toStringAsFixed(0)}%');
+    }
+
+    return quality;
   }
 
   /// Handle processing errors with retry logic
@@ -691,31 +1008,49 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
 
   @override
   Widget build(BuildContext context) {
-    return RenderAwareWidget(
-      showSeLinuxInfo: true,
-      child: Scaffold(
-        backgroundColor: Colors.black,
-        body: Stack(
-          fit: StackFit.expand,
-          children: [
-            // Camera preview
-            _buildCameraPreview(),
+    return VisibilityDetector(
+      key: const Key('camera_screen'),
+      onVisibilityChanged: (visibilityInfo) {
+        final visiblePercentage = visibilityInfo.visibleFraction * 100;
 
-            // Face positioning guide
-            _buildPositioningGuide(),
+        if (visiblePercentage == 0) {
+          // Page is completely hidden
+          Logger.info('Camera screen hidden - pausing camera');
+          _safePauseCamera();
+        } else if (visiblePercentage > 0 && !_isDisposing) {
+          // Page became visible
+          if (_cameraController == null || !_cameraController!.value.isInitialized) {
+            Logger.info('Camera screen visible - initializing camera');
+            _initializeCamera();
+          }
+        }
+      },
+      child: RenderAwareWidget(
+        showSeLinuxInfo: true,
+        child: Scaffold(
+          backgroundColor: Colors.black,
+          body: Stack(
+            fit: StackFit.expand,
+            children: [
+              // Camera preview
+              _buildCameraPreview(),
 
-            // Quality indicator overlay
-            _buildQualityIndicator(),
+              // Face positioning guide
+              _buildPositioningGuide(),
 
-            // Unrecognized face overlay
-            _buildUnrecognizedFaceOverlay(),
+              // Quality indicator overlay
+              _buildQualityIndicator(),
 
-            // Top bar
-            _buildTopBar(),
+              // Unrecognized face overlay
+              _buildUnrecognizedFaceOverlay(),
 
-            // Bottom status
-            _buildBottomStatus(),
-          ],
+              // Top bar
+              _buildTopBar(),
+
+              // Bottom status
+              _buildBottomStatus(),
+            ],
+          ),
         ),
       ),
     );
@@ -748,8 +1083,53 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
   }
 
   Widget _buildQualityIndicator() {
+    // Always show status indicator
     if (!_isFaceDetected) {
-      return const SizedBox.shrink();
+      // Show appropriate message based on error state
+      final statusText = _mlKitError
+          ? 'Camera processing error'
+          : 'Position your face in the circle';
+      final statusIcon = _mlKitError
+          ? Icons.error_outline
+          : Icons.face_retouching_off;
+      final statusColor = _mlKitError
+          ? Colors.orange.withOpacity(0.8)
+          : Colors.grey.withOpacity(0.8);
+
+      return Positioned(
+        top: MediaQuery.of(context).size.height * 0.25,
+        left: 0,
+        right: 0,
+        child: Center(
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 300),
+            padding: EdgeInsets.symmetric(horizontal: 20.w, vertical: 8.h),
+            decoration: BoxDecoration(
+              color: statusColor,
+              borderRadius: BorderRadius.circular(20.r),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  statusIcon,
+                  color: Colors.white,
+                  size: 18.sp,
+                ),
+                SizedBox(width: 8.w),
+                Text(
+                  statusText,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 14.sp,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
     }
 
     final qualityPercent = (_faceQuality * 100).toInt();
@@ -798,13 +1178,29 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
                     size: 18.sp,
                   ),
                   SizedBox(width: 8.w),
-                  Text(
-                    'Quality: $qualityPercent%',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 14.sp,
-                      fontWeight: FontWeight.bold,
-                    ),
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Face Quality: $qualityPercent%',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 14.sp,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      if (_faceQuality < 0.8)
+                        Text(
+                          _faceQuality < 0.5
+                            ? 'Move closer to camera'
+                            : 'Hold steady...',
+                          style: TextStyle(
+                            color: Colors.white70,
+                            fontSize: 11.sp,
+                          ),
+                        ),
+                    ],
                   ),
                 ],
               ),

@@ -12,17 +12,29 @@ class FaceProcessingUtils {
   static const int targetSize = 112; // MobileFaceNet input size
   static const double expandRatio = 1.2; // Expand face box by 20%
 
-  /// Convert CameraImage to Image package format
-  static img.Image? convertCameraImage(CameraImage cameraImage) {
+  /// Convert CameraImage to Image package format with rotation
+  static img.Image? convertCameraImage(CameraImage cameraImage, {int? sensorOrientation}) {
     try {
+      img.Image? image;
+
       if (cameraImage.format.group == ImageFormatGroup.yuv420) {
-        return _convertYUV420ToImage(cameraImage);
+        image = _convertYUV420ToImage(cameraImage);
       } else if (cameraImage.format.group == ImageFormatGroup.bgra8888) {
-        return _convertBGRA8888ToImage(cameraImage);
+        image = _convertBGRA8888ToImage(cameraImage);
       }
 
-      Logger.warning('Unsupported image format: ${cameraImage.format.group}');
-      return null;
+      if (image == null) {
+        Logger.warning('Unsupported image format: ${cameraImage.format.group}');
+        return null;
+      }
+
+      // Apply rotation based on sensor orientation
+      if (sensorOrientation != null && sensorOrientation != 0) {
+        Logger.debug('Rotating image by $sensorOrientation degrees for face processing');
+        image = img.copyRotate(image, angle: sensorOrientation);
+      }
+
+      return image;
     } catch (e) {
       Logger.error('Failed to convert camera image', error: e);
       return null;
