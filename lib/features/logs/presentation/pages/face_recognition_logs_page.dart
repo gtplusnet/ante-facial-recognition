@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
+import 'package:visibility_detector/visibility_detector.dart';
 
 import '../../../../core/di/injection.dart';
 import '../../../../core/utils/logger.dart';
@@ -203,9 +204,18 @@ class _FaceRecognitionLogsPageState extends State<FaceRecognitionLogsPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.grey[50],
-      appBar: AppBar(
+    return VisibilityDetector(
+      key: const Key('logs_page'),
+      onVisibilityChanged: (visibilityInfo) {
+        // Load logs when page becomes at least 10% visible
+        if (visibilityInfo.visibleFraction > 0.1) {
+          Logger.info('Logs page became visible, reloading logs...');
+          _refreshLogs();
+        }
+      },
+      child: Scaffold(
+        backgroundColor: Colors.grey[50],
+        appBar: AppBar(
         title: const Text('Face Recognition Logs'),
         elevation: 0,
         backgroundColor: Colors.white,
@@ -258,6 +268,7 @@ class _FaceRecognitionLogsPageState extends State<FaceRecognitionLogsPage> {
           ),
         ],
       ),
+    ),
     );
   }
 

@@ -93,6 +93,7 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
   bool _isFaceNotRecognized = false;
   DateTime? _lastRecognitionTime;
   FaceRecognitionStats? _stats;
+  bool _showPercentage = false; // Control percentage visibility
   bool _mlKitError = false;
 
   // Face detection for logging
@@ -1256,7 +1257,13 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Face Quality: $qualityPercent%',
+                        _showPercentage
+                            ? 'Face Quality: $qualityPercent%'
+                            : (_faceQuality >= 0.8
+                                ? 'Good Quality'
+                                : _faceQuality >= 0.6
+                                    ? 'Fair Quality'
+                                    : 'Poor Quality'),
                         style: TextStyle(
                           color: Colors.white,
                           fontSize: 14.sp,
@@ -1312,7 +1319,9 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
                     ),
                     SizedBox(width: 8.w),
                     Text(
-                      '🎯 EXCELLENT: $qualityPercent%',
+                      _showPercentage
+                          ? '🎯 EXCELLENT: $qualityPercent%'
+                          : '🎯 EXCELLENT QUALITY',
                       style: TextStyle(
                         color: Colors.white,
                         fontSize: 16.sp,
