@@ -91,19 +91,9 @@ class TFLiteService {
       final options = InterpreterOptions()
         ..threads = numThreads;
 
-      // Try to use GPU delegate if available
+      // Try to use GPU delegate if available with enhanced error handling
       if (Platform.isAndroid) {
-        try {
-          final gpuDelegateV2 = GpuDelegateV2(
-            options: GpuDelegateOptionsV2(
-              isPrecisionLossAllowed: false,
-            ),
-          );
-          options.addDelegate(gpuDelegateV2);
-          Logger.success('GPU delegation enabled');
-        } catch (e) {
-          Logger.warning('GPU delegation not available, using CPU: $e');
-        }
+        await _tryEnableGpuDelegate(options);
       }
 
       try {
@@ -396,6 +386,41 @@ class TFLiteService {
     // Convert distance to confidence score
     // Distance of 0 = 100% confidence, distance of 2 = 0% confidence
     return Math.max(0, Math.min(1, 1 - (distance / 2)));
+  }
+
+  /// Try to enable GPU delegate with comprehensive error handling
+  Future<void> _tryEnableGpuDelegate(InterpreterOptions options) async {
+    try {
+      // Check if GPU delegate is supported
+      final gpuDelegateV2 = GpuDelegateV2(
+        options: GpuDelegateOptionsV2(
+          isPrecisionLossAllowed: false,
+        ),
+      );
+
+      options.addDelegate(gpuDelegateV2);
+      Logger.success('GPU delegate enabled with optimized settings');
+
+    } catch (e) {
+      // Log specific GPU delegate errors for debugging SELinux issues
+      final errorString = e.toString().toLowerCase();
+
+      if (errorString.contains('dmabuf') || errorString.contains('getattr')) {
+        Logger.warning('GPU delegate blocked by SELinux policy (dmabuf access denied)');
+        Logger.info('This is common on devices with strict security policies');
+        Logger.info('App will use CPU processing - functionality preserved but slower');
+      } else if (errorString.contains('gpu') || errorString.contains('opencl')) {
+        Logger.warning('GPU hardware not available or incompatible');
+        Logger.info('Falling back to CPU processing');
+      } else if (errorString.contains('permission') || errorString.contains('access')) {
+        Logger.warning('GPU access permission denied - check app permissions');
+      } else {
+        Logger.warning('Unknown GPU delegate error: $e');
+      }
+
+      // Always continue with CPU-only processing
+      Logger.info('Continuing with CPU-only inference');
+    }
   }
 
   /// Dispose resources

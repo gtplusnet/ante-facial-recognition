@@ -52,17 +52,11 @@ class TFLiteEmbeddingStrategy implements EmbeddingStrategy {
         modelData.lengthInBytes,
       );
 
-      // Create interpreter options with GPU delegation
+      // Create interpreter options with enhanced GPU delegation
       final options = InterpreterOptions();
 
-      // Try to enable GPU delegation for better performance
-      try {
-        final gpuDelegate = GpuDelegateV2();
-        options.addDelegate(gpuDelegate);
-        Logger.success('GPU delegation enabled');
-      } catch (e) {
-        Logger.warning('GPU delegation not available, using CPU: $e');
-      }
+      // Try to enable GPU delegate with enhanced error handling
+      await _tryEnableGpuDelegate(options);
 
       // Create interpreter
       _interpreter = Interpreter.fromBuffer(buffer, options: options);
@@ -135,6 +129,41 @@ class TFLiteEmbeddingStrategy implements EmbeddingStrategy {
     }
 
     return normalized;
+  }
+
+  /// Try to enable GPU delegate with comprehensive error handling
+  Future<void> _tryEnableGpuDelegate(InterpreterOptions options) async {
+    try {
+      // Create GPU delegate with optimized settings
+      final gpuDelegate = GpuDelegateV2(
+        options: GpuDelegateOptionsV2(
+          isPrecisionLossAllowed: false,
+        ),
+      );
+
+      options.addDelegate(gpuDelegate);
+      Logger.success('GPU delegate enabled in embedding strategy');
+
+    } catch (e) {
+      // Handle specific GPU errors for better user feedback
+      final errorString = e.toString().toLowerCase();
+
+      if (errorString.contains('dmabuf') || errorString.contains('getattr')) {
+        Logger.info('GPU delegate blocked by device security policy');
+        Logger.info('Face recognition will use CPU processing');
+        Logger.debug('SELinux dmabuf access denied - this is expected on secure devices');
+      } else if (errorString.contains('gpu') || errorString.contains('opencl')) {
+        Logger.info('GPU hardware not compatible with TensorFlow Lite');
+        Logger.info('Using optimized CPU processing instead');
+      } else if (errorString.contains('permission') || errorString.contains('access')) {
+        Logger.warning('GPU access permission issue - check device settings');
+      } else {
+        Logger.debug('GPU delegate initialization failed: $e');
+      }
+
+      // Continue with CPU-only processing - no need to fail
+      Logger.info('Embedding strategy initialized with CPU processing');
+    }
   }
 
   @override
