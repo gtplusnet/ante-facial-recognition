@@ -43,6 +43,12 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
   DateTime? _lastProcessTime;
   static const _processingInterval = Duration(milliseconds: 800);
 
+  // Error handling and retry logic
+  int _consecutiveErrors = 0;
+  DateTime? _lastErrorTime;
+  static const int _maxConsecutiveErrors = 5;
+  static const Duration _errorCooldownDuration = Duration(seconds: 10);
+
   // Current face state
   bool _isFaceDetected = false;
   double _faceQuality = 0.0;
@@ -189,6 +195,11 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
   }
 
   Future<void> _processFrame(CameraImage image) async {
+    // Skip processing if we're in error cooldown
+    if (_isInErrorCooldown()) {
+      return;
+    }
+
     try {
       // TEMPORARY: Simulate face detection for testing quality indicator
       // This will cycle through different quality levels every few seconds
@@ -224,22 +235,24 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
         }
       }
 
+      // Reset error state on successful processing
+      if (_consecutiveErrors > 0) {
+        _resetErrorState();
+      }
+
       // Trigger face recognition if quality is good
       if (_faceQuality >= 0.8) {
         await _triggerFaceRecognition(image);
       }
 
     } catch (e) {
-      // Log the error but don't crash the app
-      Logger.error('Frame processing error', error: e);
+      _handleProcessingError('Frame processing', e);
 
-      // Reset face detection on error
-      if (_isFaceDetected) {
+      // Reset face detection state on error
+      if (_isFaceDetected && mounted) {
         _isFaceDetected = false;
         _faceQuality = 0.0;
-        if (mounted) {
-          setState(() {});
-        }
+        setState(() {});
       }
     }
   }
@@ -303,11 +316,7 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
           break;
       }
     } catch (e) {
-      Logger.error('Face recognition error', error: e);
-      _showSnackBar('Recognition failed', Colors.red);
-      setState(() {
-        _statusMessage = 'Recognition failed';
-      });
+      _handleProcessingError('Face recognition', e);
     }
   }
 
@@ -320,71 +329,6 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
     );
   }
 
-  InputImage? _convertCameraImage(CameraImage image) {
-    try {
-      final camera = _cameraController!.description;
-
-      // Get rotation based on camera orientation
-      InputImageRotation rotation = InputImageRotation.rotation0deg;
-      switch (camera.sensorOrientation) {
-        case 90:
-          rotation = InputImageRotation.rotation90deg;
-          break;
-        case 180:
-          rotation = InputImageRotation.rotation180deg;
-          break;
-        case 270:
-          rotation = InputImageRotation.rotation270deg;
-          break;
-        default:
-          rotation = InputImageRotation.rotation0deg;
-      }
-
-      // Check for supported formats
-      InputImageFormat? format;
-      switch (image.format.group) {
-        case ImageFormatGroup.yuv420:
-          format = InputImageFormat.yuv420;
-          break;
-        case ImageFormatGroup.nv21:
-          format = InputImageFormat.nv21;
-          break;
-        default:
-          // Try to get format from raw value as fallback
-          format = InputImageFormatValue.fromRawValue(image.format.raw);
-      }
-
-      if (format == null) {
-        Logger.warning('Unsupported image format: ${image.format.group} (raw: ${image.format.raw})');
-        return null;
-      }
-
-      // Validate image dimensions
-      if (image.width <= 0 || image.height <= 0 || image.planes.isEmpty) {
-        Logger.warning('Invalid image dimensions or planes: ${image.width}x${image.height}, planes: ${image.planes.length}');
-        return null;
-      }
-
-      final plane = image.planes.first;
-      if (plane.bytes.isEmpty) {
-        Logger.warning('Empty image plane bytes');
-        return null;
-      }
-
-      return InputImage.fromBytes(
-        bytes: plane.bytes,
-        metadata: InputImageMetadata(
-          size: Size(image.width.toDouble(), image.height.toDouble()),
-          rotation: rotation,
-          format: format,
-          bytesPerRow: plane.bytesPerRow,
-        ),
-      );
-    } catch (e) {
-      Logger.error('Error converting camera image to InputImage', error: e);
-      return null;
-    }
-  }
 
   double _calculateFaceQuality(Face face, CameraImage image) {
     final imageArea = image.width * image.height;
@@ -408,6 +352,61 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
     final centerScore = (1.0 - distanceFromCenter / 2).clamp(0.0, 1.0);
 
     return (sizeScore * 0.6 + centerScore * 0.4).clamp(0.0, 1.0);
+  }
+
+  /// Handle processing errors with retry logic
+  void _handleProcessingError(String operation, Object error) {
+    _consecutiveErrors++;
+    _lastErrorTime = DateTime.now();
+
+    Logger.error('$operation failed (attempt $_consecutiveErrors)', error: error);
+
+    if (_consecutiveErrors >= _maxConsecutiveErrors) {
+      _showSnackBar(
+        'Multiple errors detected. Processing paused for ${_errorCooldownDuration.inSeconds}s',
+        Colors.red,
+      );
+
+      setState(() {
+        _statusMessage = 'Processing paused - multiple errors';
+        _isFaceDetected = false;
+        _faceQuality = 0.0;
+      });
+
+      // Auto-resume after cooldown
+      Future.delayed(_errorCooldownDuration, () {
+        if (mounted) {
+          _resetErrorState();
+          setState(() {
+            _statusMessage = 'Ready (${_stats?.totalEmployees ?? 0} employees)';
+          });
+          Logger.info('Error recovery: Processing resumed');
+        }
+      });
+    } else {
+      // Show transient error message
+      _showSnackBar('Processing error (${_consecutiveErrors}/$_maxConsecutiveErrors)', Colors.orange);
+
+      setState(() {
+        _statusMessage = 'Processing error - retrying...';
+      });
+    }
+  }
+
+  /// Reset error state on successful operations
+  void _resetErrorState() {
+    _consecutiveErrors = 0;
+    _lastErrorTime = null;
+  }
+
+  /// Check if we're in error cooldown period
+  bool _isInErrorCooldown() {
+    if (_lastErrorTime == null || _consecutiveErrors < _maxConsecutiveErrors) {
+      return false;
+    }
+
+    final timeSinceLastError = DateTime.now().difference(_lastErrorTime!);
+    return timeSinceLastError < _errorCooldownDuration;
   }
 
   void _showSnackBar(String message, Color color) {
