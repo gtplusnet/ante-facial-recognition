@@ -188,9 +188,37 @@ Future<FaceResult> processImage(CameraImage image) async {
 - **test_coverage: ^1.0.0** - Coverage reports
 
 ### ML Models
-- **MobileFaceNet** (4MB) - Face recognition
-- **Custom Liveness Model** (2-5MB) - Anti-spoofing
-- **Face Quality Model** (1MB) - Image quality assessment
+
+#### Face Recognition Model Requirements
+- **Model Architecture**: MobileFaceNet or FaceNet
+- **Input Size**: 112x112x3 (RGB images)
+- **Output Size**: 128-dimensional embedding vector
+- **File Size**: 4-23MB for TFLite format
+- **Format**: Standard TensorFlow Lite (.tflite) with valid FlatBuffer structure
+
+#### Current Model Status
+⚠️ **Known Issue**: The current model files in `assets/models/mobilefacenet.tflite` have structural issues:
+- **Problem**: Downloaded TFLite models often have non-standard headers (TFL3 magic bytes at offset 4 instead of 0)
+- **Workaround**: App gracefully falls back to Mock Embedding Strategy for development/testing
+- **Solution Needed**: Obtain properly formatted TFLite model or convert existing model to standard format
+
+#### Model Sources Investigated
+1. **GitHub Repositories**:
+   - `MCarlomagno/FaceRecognitionAuth` - Contains mobilefacenet.tflite but non-standard format
+   - `shubham0204/FaceRecognition_With_FaceNet_Android` - 22.6MB FaceNet model, header issues
+
+2. **TensorFlow Hub**:
+   - Official MobileNet models available but are for image classification, not face recognition
+
+3. **Recommended Solution**:
+   - Use TensorFlow Model Maker to create custom face recognition model
+   - Or obtain pre-trained InsightFace/ArcFace model and convert to TFLite
+   - Ensure model follows standard TFLite FlatBuffer format
+
+#### Planned Models
+- **MobileFaceNet** (4MB) - Face recognition ⚠️ *Needs valid TFLite file*
+- **Custom Liveness Model** (2-5MB) - Anti-spoofing *Future implementation*
+- **Face Quality Model** (1MB) - Image quality assessment *Future implementation*
 
 ### Android Native Configuration
 

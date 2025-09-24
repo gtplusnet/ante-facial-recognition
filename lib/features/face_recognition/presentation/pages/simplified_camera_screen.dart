@@ -76,7 +76,7 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _cameraController?.dispose();
+    _disposeCamera();
     _faceDetector.close();
     _restoreSystemUI();
     super.dispose();
@@ -88,8 +88,8 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
       return;
     }
 
-    if (state == AppLifecycleState.inactive) {
-      _cameraController!.dispose();
+    if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
+      _disposeCamera();
     } else if (state == AppLifecycleState.resumed) {
       _initializeCamera();
     }
@@ -139,8 +139,12 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
 
   Future<void> _initializeCamera() async {
     try {
+      // Ensure previous camera is properly disposed
+      await _disposeCamera();
+
       final cameras = await availableCameras();
       if (cameras.isEmpty) {
+        Logger.error('No cameras available');
         _showSnackBar('No cameras available', Colors.red);
         return;
       }
@@ -151,6 +155,8 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
         orElse: () => cameras.first,
       );
 
+      Logger.info('Initializing camera: ${camera.name}');
+
       _cameraController = CameraController(
         camera,
         ResolutionPreset.high,
@@ -160,42 +166,91 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
 
       await _cameraController!.initialize();
 
-      if (mounted) {
+      if (!mounted) {
+        Logger.warning('Widget no longer mounted, disposing camera');
+        await _disposeCamera();
+        return;
+      }
+
+      if (_cameraController!.value.isInitialized) {
+        Logger.success('Camera initialized successfully');
         setState(() {});
+
+        // Add small delay to ensure camera is fully ready
+        await Future.delayed(const Duration(milliseconds: 100));
         _startImageStream();
+      } else {
+        throw Exception('Camera failed to initialize properly');
       }
     } catch (e) {
       Logger.error('Camera initialization failed', error: e);
-      _showSnackBar('Camera initialization failed', Colors.red);
+      _showSnackBar('Camera initialization failed: ${e.toString()}', Colors.red);
+
+      // Attempt cleanup on error
+      await _disposeCamera();
     }
   }
 
   void _startImageStream() {
     if (_cameraController?.value.isInitialized != true) return;
 
-    _cameraController!.startImageStream((CameraImage image) async {
-      if (_isProcessing) return;
+    try {
+      _cameraController!.startImageStream((CameraImage image) async {
+        if (_isProcessing) return;
 
-      // Throttle processing
-      if (_lastProcessTime != null &&
-          DateTime.now().difference(_lastProcessTime!) < _processingInterval) {
-        return;
+        // Throttle processing
+        if (_lastProcessTime != null &&
+            DateTime.now().difference(_lastProcessTime!) < _processingInterval) {
+          return;
+        }
+
+        _isProcessing = true;
+        _lastProcessTime = DateTime.now();
+
+        try {
+          await _processFrame(image);
+        } catch (e) {
+          Logger.error('Frame processing error', error: e);
+        } finally {
+          _isProcessing = false;
+        }
+      });
+    } catch (e) {
+      Logger.error('Failed to start image stream', error: e);
+      _showSnackBar('Failed to start camera stream', Colors.red);
+    }
+  }
+
+  Future<void> _stopImageStream() async {
+    try {
+      if (_cameraController?.value.isStreamingImages == true) {
+        await _cameraController!.stopImageStream();
+        Logger.info('Image stream stopped');
       }
+    } catch (e) {
+      Logger.error('Error stopping image stream', error: e);
+    }
+  }
 
-      _isProcessing = true;
-      _lastProcessTime = DateTime.now();
-
-      try {
-        await _processFrame(image);
-      } catch (e) {
-        Logger.error('Frame processing error', error: e);
-      } finally {
-        _isProcessing = false;
+  Future<void> _disposeCamera() async {
+    try {
+      await _stopImageStream();
+      if (_cameraController != null) {
+        await _cameraController!.dispose();
+        _cameraController = null;
+        Logger.info('Camera disposed');
       }
-    });
+    } catch (e) {
+      Logger.error('Error disposing camera', error: e);
+    }
   }
 
   Future<void> _processFrame(CameraImage image) async {
+    // Verify camera is still valid
+    if (!mounted || _cameraController?.value.isInitialized != true) {
+      return;
+    }
+
     // Skip processing if we're in error cooldown
     if (_isInErrorCooldown()) {
       return;

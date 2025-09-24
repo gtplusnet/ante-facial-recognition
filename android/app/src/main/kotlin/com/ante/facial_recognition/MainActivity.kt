@@ -126,11 +126,24 @@ class MainActivity : FlutterActivity(), LifecycleOwner {
      */
     private fun getSeLinuxStatus(): String {
         return try {
-            BufferedReader(FileReader("/sys/fs/selinux/enforce")).use { reader ->
+            val selinuxFile = java.io.File("/sys/fs/selinux/enforce")
+
+            if (!selinuxFile.exists()) {
+                Log.d(TAG, "SELinux enforce file does not exist, assuming Permissive")
+                return "Permissive"
+            }
+
+            if (!selinuxFile.canRead()) {
+                Log.d(TAG, "Cannot read SELinux enforce file, assuming Permissive")
+                return "Permissive"
+            }
+
+            BufferedReader(FileReader(selinuxFile)).use { reader ->
                 val enforce = reader.readLine()?.toIntOrNull() ?: 0
                 if (enforce == 1) "Enforcing" else "Permissive"
             }
         } catch (e: IOException) {
+            Log.d(TAG, "Failed to read SELinux status: ${e.message}")
             "Unknown"
         }
     }
