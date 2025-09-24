@@ -41,14 +41,24 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
 
   // Processing control
   bool _isProcessing = false;
+  bool _isDisposing = false;
   DateTime? _lastProcessTime;
   static const _processingInterval = Duration(milliseconds: 800);
+
+  // Frame management
+  int _frameDropCount = 0;
+  static const int _maxFrameDrops = 5;
 
   // Error handling and retry logic
   int _consecutiveErrors = 0;
   DateTime? _lastErrorTime;
   static const int _maxConsecutiveErrors = 5;
   static const Duration _errorCooldownDuration = Duration(seconds: 10);
+
+  // Camera restart logic
+  bool _isRestartingCamera = false;
+  int _cameraRestartAttempts = 0;
+  static const int _maxCameraRestarts = 3;
 
   // Current face state
   bool _isFaceDetected = false;
@@ -75,6 +85,7 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
 
   @override
   void dispose() {
+    _isDisposing = true;
     WidgetsBinding.instance.removeObserver(this);
     _disposeCamera();
     _faceDetector.close();
@@ -84,14 +95,25 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (_cameraController == null || !_cameraController!.value.isInitialized) {
+    if (_isDisposing || _cameraController == null || !_cameraController!.value.isInitialized) {
       return;
     }
 
     if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
-      _disposeCamera();
-    } else if (state == AppLifecycleState.resumed) {
+      _safePauseCamera();
+    } else if (state == AppLifecycleState.resumed && !_isDisposing) {
       _initializeCamera();
+    }
+  }
+
+  Future<void> _safePauseCamera() async {
+    try {
+      Logger.info('Pausing camera due to app lifecycle change');
+      await _stopImageStream();
+      // Small delay to ensure all frames are processed
+      await Future.delayed(const Duration(milliseconds: 200));
+    } catch (e) {
+      Logger.error('Error pausing camera', error: e);
     }
   }
 
@@ -159,15 +181,15 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
 
       _cameraController = CameraController(
         camera,
-        ResolutionPreset.high,
+        ResolutionPreset.medium, // Use medium for better performance
         enableAudio: false,
-        imageFormatGroup: ImageFormatGroup.nv21,
+        imageFormatGroup: ImageFormatGroup.nv21, // Required for ML Kit face detection
       );
 
       await _cameraController!.initialize();
 
-      if (!mounted) {
-        Logger.warning('Widget no longer mounted, disposing camera');
+      if (!mounted || _isDisposing) {
+        Logger.warning('Widget no longer mounted or disposing, cleaning up camera');
         await _disposeCamera();
         return;
       }
@@ -192,18 +214,30 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
   }
 
   void _startImageStream() {
-    if (_cameraController?.value.isInitialized != true) return;
+    if (_isDisposing || _cameraController?.value.isInitialized != true) return;
 
     try {
       _cameraController!.startImageStream((CameraImage image) {
-        // Add additional lifecycle checks
-        if (!mounted ||
+        // Comprehensive lifecycle and disposal checks
+        if (_isDisposing ||
+            !mounted ||
             _cameraController?.value.isInitialized != true ||
             _cameraController?.value.isStreamingImages != true) {
           return;
         }
 
-        if (_isProcessing) return;
+        // Skip frame if already processing (prevent backlog)
+        if (_isProcessing) {
+          _frameDropCount++;
+          if (_frameDropCount > _maxFrameDrops) {
+            Logger.warning('Dropping frames due to slow processing: $_frameDropCount');
+            _frameDropCount = 0; // Reset counter
+          }
+          return;
+        }
+
+        // Reset frame drop counter on successful processing
+        _frameDropCount = 0;
 
         // Throttle processing
         if (_lastProcessTime != null &&
@@ -214,13 +248,16 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
         _isProcessing = true;
         _lastProcessTime = DateTime.now();
 
-        // Process frame without await to prevent timing issues
-        _processFrame(image).then((_) {
+        // Process frame with enhanced error handling
+        _processFrameSafely(image).then((_) {
           // Success - processing complete
         }).catchError((e) {
           Logger.error('Frame processing error', error: e);
+          _handleProcessingError('Frame processing', e);
         }).whenComplete(() {
-          _isProcessing = false;
+          if (!_isDisposing) {
+            _isProcessing = false;
+          }
         });
       });
     } catch (e) {
@@ -229,33 +266,67 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
     }
   }
 
+  /// Safe wrapper for frame processing with disposal checks
+  Future<void> _processFrameSafely(CameraImage image) async {
+    if (_isDisposing || !mounted) {
+      return;
+    }
+    return _processFrame(image);
+  }
+
   Future<void> _stopImageStream() async {
     try {
       if (_cameraController?.value.isStreamingImages == true) {
+        Logger.info('Stopping image stream...');
         await _cameraController!.stopImageStream();
-        Logger.info('Image stream stopped');
+
+        // Wait for any pending frame processing to complete
+        int attempts = 0;
+        while (_isProcessing && attempts < 10) {
+          await Future.delayed(const Duration(milliseconds: 50));
+          attempts++;
+        }
+
+        Logger.success('Image stream stopped successfully');
+      } else {
+        Logger.info('Image stream was not active');
       }
     } catch (e) {
       Logger.error('Error stopping image stream', error: e);
+      // Continue with disposal even if stop fails
     }
   }
 
   Future<void> _disposeCamera() async {
     try {
+      Logger.info('Starting camera disposal...');
+
+      // Stop image stream first
       await _stopImageStream();
+
+      // Add delay to ensure all ImageProxy instances are closed
+      // This prevents the NullPointerException in camera_android_camerax
+      await Future.delayed(const Duration(milliseconds: 500));
+
       if (_cameraController != null) {
+        Logger.info('Disposing camera controller...');
         await _cameraController!.dispose();
         _cameraController = null;
-        Logger.info('Camera disposed');
+        Logger.success('Camera disposed successfully');
+      } else {
+        Logger.info('Camera controller was already null');
       }
     } catch (e) {
       Logger.error('Error disposing camera', error: e);
+      // Force null the controller even if disposal fails
+      _cameraController = null;
     }
   }
 
   Future<void> _processFrame(CameraImage image) async {
-    // Verify camera is still valid and image is not null
-    if (!mounted ||
+    // Enhanced verification with disposal check
+    if (_isDisposing ||
+        !mounted ||
         _cameraController?.value.isInitialized != true ||
         _cameraController?.value.isStreamingImages != true) {
       return;
@@ -427,6 +498,20 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
 
     Logger.error('$operation failed (attempt $_consecutiveErrors)', error: error);
 
+    // Check if this is a critical camera error that requires restart
+    final errorStr = error.toString().toLowerCase();
+    final isCriticalError = errorStr.contains('nullpointerexception') ||
+                           errorStr.contains('imageproxy') ||
+                           errorStr.contains('camera is closed') ||
+                           errorStr.contains('camera not initialized');
+
+    if (isCriticalError && !_isRestartingCamera) {
+      Logger.warning('Critical camera error detected, attempting restart');
+      _showSnackBar('Critical camera error - restarting camera...', Colors.orange);
+      _restartCamera();
+      return;
+    }
+
     if (_consecutiveErrors >= _maxConsecutiveErrors) {
       _showSnackBar(
         'Multiple errors detected. Processing paused for ${_errorCooldownDuration.inSeconds}s',
@@ -441,7 +526,7 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
 
       // Auto-resume after cooldown
       Future.delayed(_errorCooldownDuration, () {
-        if (mounted) {
+        if (mounted && !_isDisposing) {
           _resetErrorState();
           setState(() {
             _statusMessage = 'Ready (${_stats?.totalEmployees ?? 0} employees)';
@@ -473,6 +558,62 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
 
     final timeSinceLastError = DateTime.now().difference(_lastErrorTime!);
     return timeSinceLastError < _errorCooldownDuration;
+  }
+
+  /// Restart camera when critical errors occur
+  Future<void> _restartCamera() async {
+    if (_isRestartingCamera || _isDisposing || _cameraRestartAttempts >= _maxCameraRestarts) {
+      return;
+    }
+
+    _isRestartingCamera = true;
+    _cameraRestartAttempts++;
+
+    try {
+      Logger.info('Attempting camera restart (attempt $_cameraRestartAttempts/$_maxCameraRestarts)');
+
+      setState(() {
+        _statusMessage = 'Restarting camera...';
+      });
+
+      // Force dispose current camera
+      await _disposeCamera();
+
+      // Wait a bit before reinitializing
+      await Future.delayed(const Duration(milliseconds: 1000));
+
+      if (!mounted || _isDisposing) {
+        return;
+      }
+
+      // Reinitialize camera
+      await _initializeCamera();
+
+      // Reset error counters on successful restart
+      _resetErrorState();
+      _cameraRestartAttempts = 0;
+
+      Logger.success('Camera restarted successfully');
+
+      setState(() {
+        _statusMessage = 'Camera restarted successfully';
+      });
+
+    } catch (e) {
+      Logger.error('Camera restart failed (attempt $_cameraRestartAttempts)', error: e);
+
+      if (_cameraRestartAttempts >= _maxCameraRestarts) {
+        setState(() {
+          _statusMessage = 'Camera restart failed - please restart app';
+        });
+        _showSnackBar('Camera restart failed multiple times. Please restart the app.', Colors.red);
+      } else {
+        // Schedule another restart attempt
+        Future.delayed(const Duration(seconds: 5), _restartCamera);
+      }
+    } finally {
+      _isRestartingCamera = false;
+    }
   }
 
   void _showSnackBar(String message, Color color) {

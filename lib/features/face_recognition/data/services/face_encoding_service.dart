@@ -97,6 +97,17 @@ class FaceEncodingService {
     CameraImage cameraImage,
     CameraDescription cameraDescription,
   ) async {
+    // Quick null/validity checks before processing
+    try {
+      if (cameraImage.planes.isEmpty) {
+        Logger.warning('Camera image has no planes');
+        return null;
+      }
+    } catch (e) {
+      Logger.error('Invalid camera image provided', error: e);
+      return null;
+    }
+
     if (_isProcessing) {
       Logger.warning('Already processing a face');
       return null;
@@ -106,11 +117,14 @@ class FaceEncodingService {
     try {
       final startTime = DateTime.now();
 
-      // Detect faces in the image
+      // Detect faces in the image with enhanced error handling
       final faces = await _faceDetectionService.detectFacesFromCameraImage(
         cameraImage,
         cameraDescription,
-      );
+      ).catchError((e) {
+        Logger.error('Face detection failed with CameraImage', error: e);
+        throw Exception('Face detection error: $e');
+      });
 
       if (faces.isEmpty) {
         Logger.debug('No faces detected in camera image');
