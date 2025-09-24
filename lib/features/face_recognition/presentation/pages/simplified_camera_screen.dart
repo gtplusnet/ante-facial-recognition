@@ -195,7 +195,14 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
     if (_cameraController?.value.isInitialized != true) return;
 
     try {
-      _cameraController!.startImageStream((CameraImage image) async {
+      _cameraController!.startImageStream((CameraImage image) {
+        // Add additional lifecycle checks
+        if (!mounted ||
+            _cameraController?.value.isInitialized != true ||
+            _cameraController?.value.isStreamingImages != true) {
+          return;
+        }
+
         if (_isProcessing) return;
 
         // Throttle processing
@@ -207,13 +214,14 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
         _isProcessing = true;
         _lastProcessTime = DateTime.now();
 
-        try {
-          await _processFrame(image);
-        } catch (e) {
+        // Process frame without await to prevent timing issues
+        _processFrame(image).then((_) {
+          // Success - processing complete
+        }).catchError((e) {
           Logger.error('Frame processing error', error: e);
-        } finally {
+        }).whenComplete(() {
           _isProcessing = false;
-        }
+        });
       });
     } catch (e) {
       Logger.error('Failed to start image stream', error: e);
@@ -246,8 +254,10 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
   }
 
   Future<void> _processFrame(CameraImage image) async {
-    // Verify camera is still valid
-    if (!mounted || _cameraController?.value.isInitialized != true) {
+    // Verify camera is still valid and image is not null
+    if (!mounted ||
+        _cameraController?.value.isInitialized != true ||
+        _cameraController?.value.isStreamingImages != true) {
       return;
     }
 
