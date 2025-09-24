@@ -22,30 +22,64 @@ class FaceDetectionService {
 
   void _initializeDetector() {
     final options = mlkit.FaceDetectorOptions(
-      enableClassification: true,
-      enableLandmarks: true,
-      enableContours: true,
-      enableTracking: true,
-      minFaceSize: 0.15,
-      performanceMode: mlkit.FaceDetectorMode.accurate,
+      enableClassification: true,    // Enable for better quality scoring
+      enableLandmarks: true,         // Enable for face orientation detection
+      enableContours: true,          // Required for ACCURATE mode to work properly
+      enableTracking: true,          // Enable for continuity between frames
+      minFaceSize: 0.10,            // 10% of image - better detection at distance
+      performanceMode: mlkit.FaceDetectorMode.accurate,  // Accurate mode for better face detection
     );
 
     _faceDetector = mlkit.FaceDetector(options: options);
     _isDetectorInitialized = true;
-    Logger.info('Face detector initialized with options');
+    Logger.info('Face detector initialized - ACCURATE mode with tracking, minFaceSize: 0.10');
   }
+
+  static int _detectionAttempts = 0;
+  static int _consecutiveFails = 0;
 
   Future<List<domain.FaceDetectionResult>> detectFacesFromImage(
     mlkit.InputImage inputImage,
   ) async {
-    try {
-      final faces = await detector.processImage(inputImage);
+    _detectionAttempts++;
 
-      Logger.debug('Detected ${faces.length} face(s)');
+    try {
+      final stopwatch = Stopwatch()..start();
+
+      // Enhanced logging: Log input image dimensions and metadata
+      Logger.debug('📸 DETECTION ATTEMPT #$_detectionAttempts:');
+      Logger.debug('  Image size: ${inputImage.metadata?.size.width.toInt()}x${inputImage.metadata?.size.height.toInt()}');
+      Logger.debug('  Format: ${inputImage.metadata?.format}');
+      Logger.debug('  Rotation: ${inputImage.metadata?.rotation}');
+      Logger.debug('  Bytes per row: ${inputImage.metadata?.bytesPerRow}');
+
+      final faces = await detector.processImage(inputImage);
+      stopwatch.stop();
+
+      // Enhanced logging for detection patterns
+      if (faces.isNotEmpty) {
+        Logger.info('🎯 SUCCESS: Detected ${faces.length} face(s) in ${stopwatch.elapsedMilliseconds}ms (attempt #$_detectionAttempts)');
+        for (int i = 0; i < faces.length; i++) {
+          final face = faces[i];
+          Logger.debug('  Face $i: bounds=${face.boundingBox.width.toInt()}x${face.boundingBox.height.toInt()} at (${face.boundingBox.left.toInt()},${face.boundingBox.top.toInt()})');
+          Logger.debug('  Tracking ID: ${face.trackingId}, Head angles: X=${face.headEulerAngleX?.toStringAsFixed(1)}° Y=${face.headEulerAngleY?.toStringAsFixed(1)}°');
+        }
+        // Reset consecutive counter when we detect faces
+        _consecutiveFails = 0;
+      } else {
+        // Count consecutive failed attempts
+        _consecutiveFails++;
+        Logger.debug('❌ No faces detected (${stopwatch.elapsedMilliseconds}ms) - attempt #$_detectionAttempts [${_consecutiveFails} consecutive fails]');
+
+        // Log warning every 30 failed attempts
+        if (_consecutiveFails % 30 == 0) {
+          Logger.warning('⚠️ DETECTION ISSUE: ${_consecutiveFails} consecutive detection failures - check lighting, positioning, or camera setup');
+        }
+      }
 
       return faces.map((face) => _convertToFaceDetectionResult(face)).toList();
     } catch (e) {
-      Logger.error('Face detection failed', error: e);
+      Logger.error('Face detection failed on attempt #$_detectionAttempts', error: e);
       return [];
     }
   }
@@ -93,6 +127,23 @@ class FaceDetectionService {
     }
   }
 
+  /// Detect faces from file path (for JPEG/PNG files)
+  Future<List<domain.FaceDetectionResult>> detectFacesFromFilePath(
+    String filePath,
+  ) async {
+    try {
+      Logger.debug('Detecting faces from file: $filePath');
+
+      // Use InputImage.fromFilePath which properly handles JPEG files
+      final inputImage = mlkit.InputImage.fromFilePath(filePath);
+
+      return detectFacesFromImage(inputImage);
+    } catch (e) {
+      Logger.error('Face detection from file path failed', error: e);
+      return [];
+    }
+  }
+
   mlkit.InputImage? _convertCameraImage(
     camera.CameraImage image,
     camera.CameraDescription cameraDescription,
@@ -100,6 +151,11 @@ class FaceDetectionService {
     try {
       // Get image rotation
       final rotation = _getImageRotation(cameraDescription);
+
+      // Debug logging for rotation
+      Logger.debug('Camera: ${cameraDescription.lensDirection == camera.CameraLensDirection.front ? "Front" : "Back"}, '
+          'Sensor orientation: ${cameraDescription.sensorOrientation}, '
+          'Rotation: $rotation');
 
       // Get image format
       final format = _getImageFormat(image);
@@ -111,10 +167,26 @@ class FaceDetectionService {
       // Convert YUV420 to NV21 for ML Kit
       final bytes = _convertYuv420ToNv21(image);
 
+      // CRITICAL FIX: Keep dimensions aligned with byte array layout
+      // Do NOT swap dimensions - let ML Kit handle rotation internally
+      double width = image.width.toDouble();
+      double height = image.height.toDouble();
+
+      // Enhanced debugging for rotation and dimension alignment
+      final expectedPixels = width * height;
+      final expectedBytes = (expectedPixels * 1.5).round(); // YUV420 = 1.5 bytes per pixel
+      final actualBytes = bytes.length;
+      final bytesMatch = expectedBytes == actualBytes;
+
+      Logger.debug('Rotation mapping: sensor ${cameraDescription.sensorOrientation}° → ML Kit ${rotation.toString().split('.').last}');
+      Logger.debug('Dimensions: ${width}x$height (${expectedPixels.round()} pixels)');
+      Logger.debug('Bytes: expected $expectedBytes, actual $actualBytes, match: $bytesMatch');
+      Logger.debug('Format: $format, BytesPerRow: ${image.planes[0].bytesPerRow}');
+
       return mlkit.InputImage.fromBytes(
         bytes: bytes,
         metadata: mlkit.InputImageMetadata(
-          size: ui.Size(image.width.toDouble(), image.height.toDouble()),
+          size: ui.Size(width, height),
           rotation: rotation,
           format: format,
           bytesPerRow: image.planes[0].bytesPerRow,
@@ -157,10 +229,40 @@ class FaceDetectionService {
   mlkit.InputImageRotation _getImageRotation(
     camera.CameraDescription cameraDescription,
   ) {
-    // Simplified rotation calculation - may need adjustment based on device
     final sensorOrientation = cameraDescription.sensorOrientation;
+    final isFrontCamera = cameraDescription.lensDirection == camera.CameraLensDirection.front;
 
-    switch (sensorOrientation) {
+    Logger.debug('Camera rotation - Sensor orientation: $sensorOrientation, Front camera: $isFrontCamera');
+
+    // OPTIMIZED ROTATION MAPPING: Handle front camera rotation more accurately
+    // Account for both sensor orientation and front camera mirroring
+    int rotation = sensorOrientation;
+
+    if (isFrontCamera) {
+      // Front cameras typically need adjusted rotation to account for mirroring
+      // and proper ML Kit coordinate system alignment
+      switch (sensorOrientation) {
+        case 270:
+          rotation = 90; // 270° sensor → 90° ML Kit (most common case)
+          break;
+        case 90:
+          rotation = 270; // 90° sensor → 270° ML Kit
+          break;
+        case 0:
+          rotation = 0; // Keep 0° for portrait front cameras
+          break;
+        case 180:
+          rotation = 180; // Keep 180° for upside-down orientation
+          break;
+        default:
+          Logger.warning('Unexpected sensor orientation: $sensorOrientation, using as-is');
+          rotation = sensorOrientation;
+      }
+    }
+
+    Logger.debug('Using rotation: $rotation degrees (sensor: $sensorOrientation)');
+
+    switch (rotation) {
       case 0:
         return mlkit.InputImageRotation.rotation0deg;
       case 90:
@@ -170,6 +272,7 @@ class FaceDetectionService {
       case 270:
         return mlkit.InputImageRotation.rotation270deg;
       default:
+        Logger.warning('Unknown rotation $rotation, defaulting to 0 degrees');
         return mlkit.InputImageRotation.rotation0deg;
     }
   }
@@ -217,6 +320,20 @@ class FaceDetectionService {
             .toList();
       }
     }
+
+    // DIAGNOSTIC LOGGING - Log raw rotation values from ML Kit
+    Logger.debug('🔄 ROTATION DEBUG - Raw ML Kit values:');
+    Logger.debug('  X (pitch): ${face.headEulerAngleX?.toStringAsFixed(1)}°');
+    Logger.debug('  Y (yaw): ${face.headEulerAngleY?.toStringAsFixed(1)}°');
+    Logger.debug('  Z (roll): ${face.headEulerAngleZ?.toStringAsFixed(1)}°');
+
+    // Determine face orientation
+    final yaw = face.headEulerAngleY?.abs() ?? 0.0;
+    final pitch = face.headEulerAngleX?.abs() ?? 0.0;
+    String orientation = 'FRONTAL';
+    if (yaw > 30) orientation = 'PROFILE';
+    if (pitch > 30) orientation = 'TILTED';
+    Logger.debug('  Orientation: $orientation (yaw: ${yaw.toStringAsFixed(1)}°, pitch: ${pitch.toStringAsFixed(1)}°)');
 
     return domain.FaceDetectionResult(
       bounds: bounds,
@@ -301,7 +418,7 @@ class FaceDetectionService {
       await _faceDetector?.close();
       _faceDetector = null;
       _isDetectorInitialized = false;
-      Logger.info('Face detector disposed');
+      Logger.info('Face detector disposed and reset');
     } catch (e) {
       Logger.error('Failed to dispose face detector', error: e);
     }

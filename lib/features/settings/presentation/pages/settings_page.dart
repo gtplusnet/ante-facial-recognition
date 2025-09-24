@@ -9,6 +9,9 @@ import '../../../authentication/presentation/bloc/auth_bloc.dart';
 import '../../../authentication/presentation/bloc/auth_event.dart';
 import '../../../authentication/presentation/bloc/auth_state.dart';
 import '../../../employee/domain/usecases/clear_employee_data_usecase.dart';
+import '../../../employee/presentation/bloc/employee_bloc.dart';
+import '../../../employee/presentation/bloc/employee_event.dart';
+import '../../../employee/presentation/bloc/employee_state.dart';
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
@@ -225,19 +228,19 @@ class SettingsPage extends StatelessWidget {
   }
 
   void _performClearData(BuildContext context, ClearDataType type) async {
-    // Create a variable to track if dialog is showing
-    bool dialogShowing = false;
-
     try {
       final clearDataUseCase = getIt<ClearEmployeeDataUseCase>();
+
+      // Store references before async operations
+      final navigator = Navigator.of(context);
       final messenger = ScaffoldMessenger.of(context);
       final theme = Theme.of(context);
 
-      // Show loading dialog and track it
-      dialogShowing = true;
+      // Show loading dialog with proper context handling
       showDialog(
         context: context,
         barrierDismissible: false,
+        useRootNavigator: true,
         builder: (dialogContext) => PopScope(
           canPop: false,
           child: const AlertDialog(
@@ -252,68 +255,78 @@ class SettingsPage extends StatelessWidget {
         ),
       );
 
-      final result = await clearDataUseCase(ClearEmployeeDataParams(type: type));
+      try {
+        final result = await clearDataUseCase(ClearEmployeeDataParams(type: type));
 
-      // Close loading dialog if it's showing
-      if (dialogShowing && context.mounted) {
-        Navigator.of(context).pop();
-        dialogShowing = false;
-      }
+        // Close loading dialog using root navigator
+        if (context.mounted) {
+          Navigator.of(context, rootNavigator: true).pop();
+        }
 
-      if (!context.mounted) return;
+        if (!context.mounted) return;
 
-      result.fold(
-        (failure) {
+        result.fold(
+          (failure) {
+            messenger.showSnackBar(
+              SnackBar(
+                content: Text('Error: ${failure.message}'),
+                backgroundColor: theme.colorScheme.error,
+              ),
+            );
+          },
+          (clearResult) {
+            String message;
+            switch (type) {
+              case ClearDataType.employeesOnly:
+                message = 'Cleared ${clearResult.deletedEmployees} employees';
+                break;
+              case ClearDataType.logsOnly:
+                message = 'Cleared ${clearResult.deletedLogs} recognition logs';
+                break;
+              case ClearDataType.cacheOnly:
+                message = 'Freed ${(clearResult.freedBytes / 1024).toStringAsFixed(1)} KB of cache';
+                break;
+              case ClearDataType.allData:
+                message = 'Cleared all data: ${clearResult.deletedEmployees} employees, ${clearResult.deletedLogs} logs';
+                break;
+            }
+
+            messenger.showSnackBar(
+              SnackBar(
+                content: Text(message),
+                backgroundColor: Colors.green,
+              ),
+            );
+          },
+        );
+      } catch (operationError) {
+        // Ensure dialog is closed on operation error
+        if (context.mounted) {
+          Navigator.of(context, rootNavigator: true).pop();
+        }
+
+        if (context.mounted) {
           messenger.showSnackBar(
             SnackBar(
-              content: Text('Error: ${failure.message}'),
+              content: Text('Error clearing data: $operationError'),
               backgroundColor: theme.colorScheme.error,
             ),
           );
-        },
-        (clearResult) {
-          String message;
-          switch (type) {
-            case ClearDataType.employeesOnly:
-              message = 'Cleared ${clearResult.deletedEmployees} employees';
-              break;
-            case ClearDataType.logsOnly:
-              message = 'Cleared ${clearResult.deletedLogs} recognition logs';
-              break;
-            case ClearDataType.cacheOnly:
-              message = 'Freed ${(clearResult.freedBytes / 1024).toStringAsFixed(1)} KB of cache';
-              break;
-            case ClearDataType.allData:
-              message = 'Cleared all data: ${clearResult.deletedEmployees} employees, ${clearResult.deletedLogs} logs';
-              break;
-          }
-
-          messenger.showSnackBar(
-            SnackBar(
-              content: Text(message),
-              backgroundColor: Colors.green,
-            ),
-          );
-        },
-      );
-    } catch (e) {
-      // Close loading dialog if it's showing
-      if (dialogShowing && context.mounted) {
-        Navigator.of(context).pop();
-        dialogShowing = false;
+        }
       }
+    } catch (e) {
+      // Handle any other errors (like dependency injection failures)
+      if (context.mounted) {
+        final messenger = ScaffoldMessenger.of(context);
+        final theme = Theme.of(context);
 
-      if (!context.mounted) return;
-
-      final messenger = ScaffoldMessenger.of(context);
-      final theme = Theme.of(context);
-
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text('Error clearing data: $e'),
-          backgroundColor: theme.colorScheme.error,
-        ),
-      );
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text('Unexpected error: $e'),
+            backgroundColor: theme.colorScheme.error,
+          ),
+        );
+      }
     }
   }
 
@@ -439,6 +452,37 @@ class SettingsPage extends StatelessWidget {
                   );
                 },
               ),
+
+              // Note: Employee sync has been moved to the Employee List page
+              // to maintain single source of truth for sync functionality
+              Container(
+                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.surfaceVariant.withOpacity(0.3),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.info_outline,
+                      color: theme.colorScheme.onSurfaceVariant,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        'To sync employees, go to the Employee List page and use the sync button there.',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 8),
 
               ListTile(
                 leading: Icon(

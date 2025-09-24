@@ -38,6 +38,24 @@ class FaceRecognitionNoFace extends FaceRecognitionState {
   const FaceRecognitionNoFace();
 }
 
+/// State for live quality feedback (always shows current detection status)
+class FaceRecognitionLiveQuality extends FaceRecognitionState {
+  final double? quality;
+  final bool faceDetected;
+  final String detectionStatus;
+  final int detectionAttempts;
+
+  const FaceRecognitionLiveQuality({
+    this.quality,
+    required this.faceDetected,
+    required this.detectionStatus,
+    this.detectionAttempts = 0,
+  });
+
+  @override
+  List<Object?> get props => [quality, faceDetected, detectionStatus, detectionAttempts];
+}
+
 class FaceRecognitionPoorQuality extends FaceRecognitionState {
   final double quality;
   final String message;

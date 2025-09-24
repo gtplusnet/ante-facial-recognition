@@ -19,14 +19,16 @@ import 'embedding_strategy.dart';
 class TFLiteEmbeddingStrategy implements EmbeddingStrategy {
   static const String modelPath = 'assets/models/mobilefacenet.tflite';
   static const int inputSize = 112;
-  static const int outputSize = 128;
+  static const int outputSize = 192;  // MobileFaceNet outputs 192-dimensional embeddings
 
   Interpreter? _interpreter;
+  Interpreter? _cpuInterpreter;  // CPU-only interpreter for fallback
   List<int>? _inputShape;
   List<int>? _outputShape;
   TensorType? _inputType;
   TensorType? _outputType;
   bool _isInitialized = false;
+  bool _hasGpuSupport = false;
 
   // Isolate processing
   Isolate? _isolate;
@@ -50,19 +52,25 @@ class TFLiteEmbeddingStrategy implements EmbeddingStrategy {
       final buffer = modelBytes.buffer.asUint8List();
 
       // Create interpreter options with GPU delegation
-      final options = InterpreterOptions();
+      final gpuOptions = InterpreterOptions();
+      final cpuOptions = InterpreterOptions();
 
       // Try to enable GPU delegation for better performance
       try {
         final gpuDelegate = GpuDelegateV2();
-        options.addDelegate(gpuDelegate);
-        Logger.success('GPU delegation enabled');
+        gpuOptions.addDelegate(gpuDelegate);
+        _interpreter = Interpreter.fromBuffer(buffer, options: gpuOptions);
+        _hasGpuSupport = true;
+        Logger.success('GPU delegation enabled for main thread');
       } catch (e) {
         Logger.warning('GPU delegation not available, using CPU: $e');
+        _interpreter = Interpreter.fromBuffer(buffer, options: cpuOptions);
+        _hasGpuSupport = false;
       }
 
-      // Create interpreter
-      _interpreter = Interpreter.fromBuffer(buffer, options: options);
+      // Always create a CPU-only interpreter for fallback
+      _cpuInterpreter = Interpreter.fromBuffer(buffer, options: cpuOptions);
+      Logger.info('CPU interpreter created for fallback');
 
       // Get input and output shapes
       _inputShape = _interpreter!.getInputTensor(0).shape;
@@ -88,7 +96,7 @@ class TFLiteEmbeddingStrategy implements EmbeddingStrategy {
 
   @override
   Future<Float32List> extractEmbedding(Uint8List imageBytes) async {
-    if (!_isInitialized || _interpreter == null) {
+    if (!_isInitialized || (_interpreter == null && _cpuInterpreter == null)) {
       throw StateError('TFLite strategy not initialized');
     }
 
@@ -96,11 +104,26 @@ class TFLiteEmbeddingStrategy implements EmbeddingStrategy {
       // Decode and preprocess image
       final input = _preprocessImage(imageBytes);
 
-      // Create output tensor
+      // Create output tensor with correct dimensions
       final output = List.generate(1, (index) => List.filled(outputSize, 0.0));
 
-      // Run inference
-      _interpreter!.run(input, output);
+      // Try GPU inference first (only works on main thread)
+      bool success = false;
+      if (_hasGpuSupport && _interpreter != null) {
+        try {
+          _interpreter!.run(input, output);
+          success = true;
+          Logger.debug('Used GPU for inference');
+        } catch (gpuError) {
+          Logger.warning('GPU inference failed, falling back to CPU: $gpuError');
+        }
+      }
+
+      // Fallback to CPU if GPU failed or not available
+      if (!success && _cpuInterpreter != null) {
+        _cpuInterpreter!.run(input, output);
+        Logger.debug('Used CPU for inference');
+      }
 
       // Extract and normalize embedding
       final embedding = Float32List.fromList(output[0].cast<double>());
@@ -138,6 +161,7 @@ class TFLiteEmbeddingStrategy implements EmbeddingStrategy {
   void dispose() {
     try {
       _interpreter?.close();
+      _cpuInterpreter?.close();
       _isolate?.kill();
       _isInitialized = false;
       Logger.info('TFLite embedding strategy disposed');

@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:lottie/lottie.dart';
 
+import '../../../../core/constants/face_recognition_constants.dart';
 import '../bloc/face_recognition_bloc.dart';
 import '../bloc/face_recognition_state.dart';
 
@@ -30,6 +31,13 @@ class RecognitionFeedbackOverlay extends StatelessWidget {
 
         return Stack(
           children: [
+            // Live quality monitor (always visible in top-right)
+            Positioned(
+              top: 60.h,
+              right: 20.w,
+              child: _LiveQualityMonitor(state: state, faceQuality: faceQuality),
+            ),
+
             // Face bounding box overlay
             if (faceBoundingBox != null && state is FaceRecognitionScanning)
               _FaceBoundingBox(
@@ -46,8 +54,8 @@ class RecognitionFeedbackOverlay extends StatelessWidget {
                 child: _StatusIndicator(state: state),
               ),
 
-            // 90% Quality Reached Indicator
-            if (faceQuality != null && faceQuality! >= 0.9)
+            // Quality threshold reached indicator
+            if (faceQuality != null && faceQuality! >= FaceRecognitionConstants.qualityThreshold)
               Positioned(
                 top: 160.h,
                 left: 0,
@@ -461,47 +469,193 @@ class _ProcessingIndicator extends StatelessWidget {
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
           // Animated face scanning icon
-          SizedBox(
-            width: 100.w,
-            height: 100.h,
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                Icon(
-                  Icons.face,
-                  size: 60.sp,
-                  color: Colors.blue,
-                ),
-                SizedBox(
-                  width: 80.w,
-                  height: 80.h,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 3.w,
-                    valueColor: const AlwaysStoppedAnimation<Color>(Colors.blue),
+          Flexible(
+            child: SizedBox(
+              width: 80.w,
+              height: 80.h,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  Icon(
+                    Icons.face,
+                    size: 50.sp,
+                    color: Colors.blue,
                   ),
-                ),
-              ],
+                  SizedBox(
+                    width: 70.w,
+                    height: 70.h,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 3.w,
+                      valueColor: const AlwaysStoppedAnimation<Color>(Colors.blue),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
-          SizedBox(height: 20.h),
+          SizedBox(height: 16.h),
           Text(
             'Processing',
             style: TextStyle(
-              fontSize: 18.sp,
+              fontSize: 16.sp,
               fontWeight: FontWeight.bold,
               color: Colors.black87,
             ),
           ),
-          SizedBox(height: 8.h),
+          SizedBox(height: 6.h),
           Text(
             'Please wait...',
             style: TextStyle(
-              fontSize: 14.sp,
+              fontSize: 13.sp,
               color: Colors.black54,
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Live quality monitor showing real-time face detection status
+class _LiveQualityMonitor extends StatelessWidget {
+  final FaceRecognitionState state;
+  final double? faceQuality;
+
+  const _LiveQualityMonitor({
+    required this.state,
+    this.faceQuality,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // Determine display values based on state
+    String status = 'No Face';
+    double? quality = faceQuality;
+    Color backgroundColor;
+    Color textColor = Colors.white;
+    IconData icon = Icons.face_retouching_off;
+
+    if (state is FaceRecognitionScanning) {
+      status = quality != null ? 'Detecting' : 'Searching...';
+      icon = Icons.face;
+    } else if (state is FaceRecognitionPoorQuality) {
+      final poorState = state as FaceRecognitionPoorQuality;
+      status = 'Low Quality';
+      quality = poorState.quality;
+      icon = Icons.warning;
+    } else if (state is FaceRecognitionMatched) {
+      status = 'Recognized';
+      icon = Icons.check_circle;
+    } else if (state is FaceRecognitionUnknown) {
+      status = 'Unknown';
+      icon = Icons.error;
+    } else if (state is FaceRecognitionNoFace) {
+      status = 'No Face';
+      icon = Icons.face_retouching_off;
+    } else if (state is FaceRecognitionError) {
+      status = 'Error';
+      icon = Icons.warning;
+    } else if (state is FaceRecognitionReady) {
+      status = 'Ready';
+      icon = Icons.camera_front;
+    } else if (state is FaceRecognitionLoading) {
+      status = 'Loading...';
+      icon = Icons.hourglass_empty;
+    }
+
+    // Color-coded background based on quality and status
+    if (state is FaceRecognitionMatched) {
+      backgroundColor = Colors.green.withOpacity(0.9);
+    } else if (state is FaceRecognitionError || state is FaceRecognitionUnknown) {
+      backgroundColor = Colors.red.withOpacity(0.9);
+    } else if (quality != null) {
+      if (quality >= 0.9) {
+        backgroundColor = Colors.green.withOpacity(0.9);
+      } else if (quality >= 0.7) {
+        backgroundColor = Colors.orange.withOpacity(0.9);
+      } else {
+        backgroundColor = Colors.red.withOpacity(0.9);
+      }
+    } else {
+      backgroundColor = Colors.grey.withOpacity(0.9);
+    }
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 8.h),
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(16.r),
+        boxShadow: [
+          BoxShadow(
+            color: backgroundColor.withOpacity(0.3),
+            blurRadius: 8,
+            spreadRadius: 1,
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Status with icon
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                icon,
+                color: textColor,
+                size: 16.sp,
+              ),
+              SizedBox(width: 6.w),
+              Text(
+                status,
+                style: TextStyle(
+                  color: textColor,
+                  fontSize: 11.sp,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+
+          // Quality percentage (if available)
+          if (quality != null) ...[
+            SizedBox(height: 4.h),
+            Text(
+              '${(quality * 100).toInt()}%',
+              style: TextStyle(
+                color: textColor,
+                fontSize: 16.sp,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+
+          // Quality threshold indicator
+          if (quality != null) ...[
+            SizedBox(height: 4.h),
+            Container(
+              width: 40.w,
+              height: 4.h,
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.3),
+                borderRadius: BorderRadius.circular(2.r),
+              ),
+              child: FractionallySizedBox(
+                alignment: Alignment.centerLeft,
+                widthFactor: quality.clamp(0.0, 1.0),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: textColor,
+                    borderRadius: BorderRadius.circular(2.r),
+                  ),
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );

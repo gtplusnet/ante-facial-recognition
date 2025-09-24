@@ -8,6 +8,7 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import '../../../../core/di/injection.dart';
 import '../../../../core/utils/logger.dart';
 import '../../../../core/services/feedback_service.dart';
+import '../../../../core/constants/face_recognition_constants.dart';
 import '../../../../core/widgets/app_error_widget.dart';
 import '../../../../core/widgets/app_loading_indicator.dart';
 import '../../../camera/data/datasources/camera_data_source.dart';
@@ -57,7 +58,7 @@ class _FaceRecognitionPageState extends State<FaceRecognitionPage> {
     _employeeBloc = getIt<EmployeeBloc>();
     _feedbackService = getIt<FeedbackService>();
     _initializeServices();
-    _initializeCamera();
+    // Camera initialization moved to FaceRecognitionBloc for centralized control
     _initializeFaceRecognition();
   }
 
@@ -65,21 +66,8 @@ class _FaceRecognitionPageState extends State<FaceRecognitionPage> {
     await _feedbackService.initialize();
   }
 
-  Future<void> _initializeCamera() async {
-    try {
-      // Initialize camera first
-      await _cameraDataSource.initializeCamera();
-      Logger.info('Camera initialized, starting face detection');
-
-      // Then start face detection after camera is ready
-      await Future.delayed(const Duration(milliseconds: 500));
-      if (mounted) {
-        _faceDetectionBloc.add(const StartFaceDetection());
-      }
-    } catch (e) {
-      Logger.error('Failed to initialize camera', error: e);
-    }
-  }
+  // Camera initialization removed - handled by FaceRecognitionBloc
+  // to prevent multiple simultaneous initialization attempts
 
   Future<void> _initializeFaceRecognition() async {
     Logger.info('Initializing face recognition from FaceRecognitionPage');
@@ -116,7 +104,17 @@ class _FaceRecognitionPageState extends State<FaceRecognitionPage> {
           BlocListener<FaceRecognitionBloc, FaceRecognitionState>(
             listener: _handleFaceRecognition,
           ),
-          // Listen for FaceRecognitionReady state to start recognition
+          // Listen for FaceRecognitionReady state to start face detection
+          BlocListener<FaceRecognitionBloc, FaceRecognitionState>(
+            listenWhen: (previous, current) =>
+              previous is! FaceRecognitionReady && current is FaceRecognitionReady,
+            listener: (context, state) {
+              if (state is FaceRecognitionReady) {
+                Logger.info('Face recognition ready, starting face detection');
+                _faceDetectionBloc.add(const StartFaceDetection());
+              }
+            },
+          ),
           BlocListener<FaceRecognitionBloc, FaceRecognitionState>(
             listenWhen: (previous, current) =>
                 previous is! FaceRecognitionReady && current is FaceRecognitionReady,
@@ -165,13 +163,13 @@ class _FaceRecognitionPageState extends State<FaceRecognitionPage> {
       // Log all face detections with quality for debugging
       Logger.debug('Face detected with quality: ${qualityPercent}%');
 
-      // Special log for 90% quality as requested by user
-      if (state.face.qualityScore >= 0.9) {
-        Logger.info('🎯 FACE QUALITY REACHED 90%! Quality: ${qualityPercent}%');
+      // Special log for high quality faces
+      if (state.face.qualityScore >= FaceRecognitionConstants.qualityThreshold) {
+        Logger.info('🎯 FACE QUALITY REACHED ${(FaceRecognitionConstants.qualityThreshold * 100).toInt()}%! Quality: ${qualityPercent}%');
       }
 
-      // Use 90% threshold for face recognition trigger
-      if (state.face.qualityScore >= 0.9 && timeSinceLastProcess > _processingInterval) {
+      // Use quality threshold for face recognition trigger
+      if (state.face.qualityScore >= FaceRecognitionConstants.qualityThreshold && timeSinceLastProcess > _processingInterval) {
         _lastProcessedTime = now;
         Logger.info('Face detected with good quality (${qualityPercent}%), triggering recognition');
 
@@ -181,13 +179,6 @@ class _FaceRecognitionPageState extends State<FaceRecognitionPage> {
           Logger.info('📸 Sending camera image to recognition (size: ${_latestCameraImage!.width}x${_latestCameraImage!.height})');
           _faceRecognitionBloc.add(ProcessCameraFrame(_latestCameraImage!));
           Logger.success('✅ ProcessCameraFrame event sent to FaceRecognitionBloc');
-
-          // Show recognition dialog with mock data after a brief delay
-          Future.delayed(const Duration(milliseconds: 500), () {
-            if (mounted && !_isDialogShowing) {
-              _showRecognitionDialog();
-            }
-          });
         } else if (_faceRecognitionBloc.state is FaceRecognitionReady) {
           // Start recognition scanning
           _faceRecognitionBloc.add(const StartRecognition());
@@ -219,11 +210,21 @@ class _FaceRecognitionPageState extends State<FaceRecognitionPage> {
       _feedbackService.playSuccessFeedback();
       Logger.success('Face recognized: ${state.employee.name}');
 
+      // Show recognition dialog for matched face
+      if (!_isDialogShowing) {
+        _showRecognitionResultFromState(state);
+      }
+
     } else if (state is FaceRecognitionUnknown) {
       // Play error feedback for unknown face
       Logger.info('Triggering error feedback for unknown face');
       _feedbackService.playErrorFeedback();
       Logger.warning('Unknown face detected');
+
+      // Show recognition dialog for unknown face
+      if (!_isDialogShowing) {
+        _showRecognitionResultFromState(state);
+      }
 
     } else if (state is FaceRecognitionNoFace) {
       // No feedback needed, just scanning
@@ -268,6 +269,7 @@ class _FaceRecognitionPageState extends State<FaceRecognitionPage> {
     return CameraPreviewWidget(
       cameraDataSource: _cameraDataSource,
       showControls: false,
+      autoInitialize: false,  // Camera initialization is handled by FaceRecognitionBloc
       onImage: (image) {
         // Store the latest camera image for face recognition with detailed logging
         final wasNull = _latestCameraImage == null;
@@ -469,20 +471,29 @@ class _FaceRecognitionPageState extends State<FaceRecognitionPage> {
     );
   }
 
-  void _showRecognitionDialog() {
+  void _showRecognitionResultFromState(FaceRecognitionState state) {
     // Set flag to stop face detection
     _isDialogShowing = true;
     Logger.info('🎯 Showing recognition dialog - face detection paused');
 
-    // Simulate different recognition results randomly
-    final isRecognized = DateTime.now().millisecond % 2 == 0; // 50% chance
+    bool isRecognized = false;
+    String? employeeName;
+    String? employeeId;
+    double? confidence;
+
+    if (state is FaceRecognitionMatched) {
+      isRecognized = true;
+      employeeName = state.employee.name;
+      employeeId = state.employee.id;
+      confidence = state.confidence;
+    }
 
     showRecognitionResultDialog(
       context,
       isRecognized: isRecognized,
-      employeeName: isRecognized ? 'Guillermo Tabligan' : null,
-      employeeId: isRecognized ? 'EMP-001' : null,
-      confidence: isRecognized ? 0.94 : null,
+      employeeName: employeeName,
+      employeeId: employeeId,
+      confidence: confidence,
       onDismiss: () {
         // Resume face detection when dialog is dismissed
         _isDialogShowing = false;
@@ -493,15 +504,8 @@ class _FaceRecognitionPageState extends State<FaceRecognitionPage> {
         _faceDetectionBloc.add(const ResetFaceDetection());
 
         // Reset face recognition state to allow new attempts
-        final currentState = _faceRecognitionBloc.state;
-        if (currentState is FaceRecognitionPoorQuality ||
-            currentState is FaceRecognitionError ||
-            currentState is FaceRecognitionUnknown ||
-            currentState is FaceRecognitionMatched ||
-            currentState is FaceRecognitionNoFace) {
-          Logger.info('Resetting recognition state from ${currentState.runtimeType} to Scanning');
-          _faceRecognitionBloc.add(const StartRecognition());
-        }
+        Logger.info('Resetting recognition state to Scanning');
+        _faceRecognitionBloc.add(const StartRecognition());
       },
     );
   }

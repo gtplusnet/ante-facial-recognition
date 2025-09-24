@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'core/di/injection.dart';
 import 'core/router/app_router.dart';
+import 'core/services/background_service.dart';
 import 'core/theme/app_theme.dart';
 import 'core/utils/app_bloc_observer.dart';
 import 'core/utils/logger.dart';
@@ -49,6 +50,12 @@ Future<void> main() async {
       try {
         await configureDependencies();
         Logger.info('Dependency injection initialized successfully');
+
+        // Initialize WorkManager for background sync
+        await BackgroundService.initialize();
+
+        // Schedule periodic employee sync
+        await BackgroundService.schedulePeriodicSync();
       } catch (e, stackTrace) {
         Logger.error('Failed to initialize dependencies',
           error: e,

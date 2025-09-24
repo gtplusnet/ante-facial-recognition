@@ -5,6 +5,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:injectable/injectable.dart';
 
 import '../../../../core/utils/logger.dart';
+import '../../../../core/constants/face_recognition_constants.dart';
 import '../../../employee/domain/entities/employee.dart';
 import '../../../employee/data/models/face_encoding_model.dart';
 import '../../../employee/data/datasources/employee_local_datasource.dart';
@@ -171,32 +172,50 @@ class FaceRecognitionBloc extends Bloc<FaceRecognitionEvent, FaceRecognitionStat
         return;
       }
 
-      // Check face quality
-      if (encodingResult.quality < 0.9) {
+      // Check face quality (aligned with face detection threshold)
+      Logger.debug('🎯 RECOGNITION DEBUG - Quality check:');
+      Logger.debug('  Face quality: ${(encodingResult.quality * 100).toStringAsFixed(1)}%');
+      Logger.debug('  Required threshold: ${(FaceRecognitionConstants.qualityThreshold * 100).toStringAsFixed(1)}%');
+
+      if (encodingResult.quality < FaceRecognitionConstants.qualityThreshold) {
+        Logger.warning('❌ Face quality too low: ${(encodingResult.quality * 100).toStringAsFixed(1)}% < ${(FaceRecognitionConstants.qualityThreshold * 100).toStringAsFixed(1)}%');
+
+        // ENHANCED: Still emit the quality so UI can show progress, but indicate it's too low
+        String qualityMessage;
+        if (encodingResult.quality < 0.5) {
+          qualityMessage = 'Face detected! Move closer and face camera directly';
+        } else if (encodingResult.quality < 0.7) {
+          qualityMessage = 'Good positioning! Improve lighting and stay still';
+        } else {
+          qualityMessage = 'Almost there! Hold steady for better quality';
+        }
+
         emit(FaceRecognitionPoorQuality(
           quality: encodingResult.quality,
-          message: 'Please face the camera directly in good lighting',
+          message: qualityMessage,
         ));
         _isProcessing = false;
         return;
       }
 
+      Logger.debug('✅ Face quality passed: ${(encodingResult.quality * 100).toStringAsFixed(1)}%');
+
       // Find best match from known employees
       final matchResult = _faceEncodingService.findBestMatch(
         encodingResult.embedding,
         _employeeEncodings,
-        threshold: 0.6,
+        threshold: FaceRecognitionConstants.faceMatchThreshold,
       );
 
-      if (matchResult != null && matchResult.isMatch) {
-        final employee = _employeeDatabase[matchResult.matchedId];
+      if (matchResult != null && matchResult['isMatch'] == true) {
+        final employee = _employeeDatabase[matchResult['matchedId']];
         if (employee != null) {
           emit(FaceRecognitionMatched(
             employee: employee,
-            confidence: matchResult.confidence,
-            distance: matchResult.distance,
+            confidence: matchResult['confidence'] as double,
+            distance: matchResult['distance'] as double,
           ));
-          Logger.success('Face recognized: ${employee.name} (confidence: ${matchResult.confidence})');
+          Logger.success('Face recognized: ${employee.name} (confidence: ${matchResult['confidence']})');
         }
       } else {
         emit(const FaceRecognitionUnknown());
@@ -293,8 +312,8 @@ class FaceRecognitionBloc extends Bloc<FaceRecognitionEvent, FaceRecognitionStat
 
   Future<void> _loadEmployeesFromDatabase() async {
     try {
-      // Load employees from local database
-      final employees = await _employeeDataSource.getAllEmployees();
+      // Load employees from local database (with face encodings)
+      final employees = await _employeeDataSource.getEmployees();
 
       _employeeDatabase.clear();
       _employeeEncodings.clear();
@@ -315,6 +334,9 @@ class FaceRecognitionBloc extends Bloc<FaceRecognitionEvent, FaceRecognitionStat
           Logger.warning('No face encoding for ${employee.name}');
         }
       }
+
+      // Load encodings into the face encoding service cache
+      await _faceEncodingService.loadEncodings(_employeeEncodings);
 
       Logger.info('Loaded ${employees.length} employees (${loadedWithEncodings} with face encodings)');
     } catch (e) {

@@ -191,22 +191,94 @@ class FaceProcessingUtils {
     FaceDetectionResult face,
     img.Image? faceImage,
   ) {
-    double qualityScore = 1.0;
+    // OPTIMIZED QUALITY CALCULATION: More balanced weighting for frontal vs side view faces
+    // Weights: face detection quality (60%), orientation bonus (25%), size (10%), blur (5%)
 
-    // Check face angle (from detection result)
-    qualityScore *= face.qualityScore;
+    double weightedSum = 0.0;
+    double totalWeight = 0.0;
 
-    // Check face size (should be large enough)
-    final double sizeScore = math.min(1.0, face.bounds.width / 100.0);
-    qualityScore *= sizeScore;
+    // Face detection quality (60% weight - reduced to give more room for other factors)
+    final detectionQuality = face.qualityScore;
+    weightedSum += detectionQuality * 0.6;
+    totalWeight += 0.6;
 
-    // Check if image is blurry (if image provided)
+    // Orientation-based quality bonus (25% weight - NEW)
+    // Give frontal faces a quality boost since they're preferred for recognition
+    final double orientationScore = _calculateOrientationScore(face);
+    weightedSum += orientationScore * 0.25;
+    totalWeight += 0.25;
+
+    // Check face size (10% weight - reduced from 20%)
+    final double sizeScore = _calculateSizeScore(face);
+    weightedSum += sizeScore * 0.1;
+    totalWeight += 0.1;
+
+    // Check if image is blurry (5% weight if available - reduced from 10%)
+    double blurScore = 0.7; // Default optimistic score for better quality
     if (faceImage != null) {
-      final double blurScore = _calculateBlurScore(faceImage);
-      qualityScore *= blurScore;
+      blurScore = _calculateBlurScore(faceImage);
+      weightedSum += blurScore * 0.05;
+      totalWeight += 0.05;
     }
 
-    return qualityScore.clamp(0.0, 1.0);
+    // Calculate final quality as weighted average
+    final double qualityScore = totalWeight > 0 ? weightedSum / totalWeight : 0.0;
+    final double finalScore = qualityScore.clamp(0.0, 1.0);
+
+    // DIAGNOSTIC LOGGING - Log quality calculation breakdown
+    Logger.debug('💎 QUALITY DEBUG - Face quality breakdown:');
+    Logger.debug('  Detection quality: ${(detectionQuality * 100).toStringAsFixed(1)}% (weight: 60%)');
+    Logger.debug('  Orientation score: ${(orientationScore * 100).toStringAsFixed(1)}% (weight: 25%)');
+    Logger.debug('  Size score: ${(sizeScore * 100).toStringAsFixed(1)}% (width: ${face.bounds.width.toInt()}px, weight: 10%)');
+    Logger.debug('  Blur score: ${(blurScore * 100).toStringAsFixed(1)}% (weight: 5%)');
+    Logger.debug('  Final quality: ${(finalScore * 100).toStringAsFixed(1)}%');
+
+    // Check if face is frontal
+    final isFrontal = isFaceFrontal(face);
+    Logger.debug('  Is frontal: $isFrontal');
+    if (!isFrontal && face.rotationY != null) {
+      Logger.warning('  Face rejected as non-frontal: yaw=${face.rotationY!.abs().toStringAsFixed(1)}° (threshold: 30°)');
+    }
+
+    return finalScore;
+  }
+
+  /// Calculate orientation-based quality score
+  /// Gives frontal faces a higher score since they're preferred for recognition
+  static double _calculateOrientationScore(FaceDetectionResult face) {
+    final yaw = face.rotationY?.abs() ?? 0.0;
+    final pitch = face.rotationX?.abs() ?? 0.0;
+
+    // Perfect frontal face (yaw/pitch both 0°) gets score of 1.0
+    // Score decreases as face turns away from frontal
+    final yawScore = math.max(0.0, 1.0 - (yaw / 45.0)); // Linear decrease to 0 at 45°
+    final pitchScore = math.max(0.0, 1.0 - (pitch / 45.0)); // Linear decrease to 0 at 45°
+
+    // Combine yaw and pitch scores (both matter for frontal detection)
+    final orientationScore = (yawScore + pitchScore) / 2.0;
+
+    return orientationScore.clamp(0.0, 1.0);
+  }
+
+  /// Calculate size-based quality score with better scaling
+  static double _calculateSizeScore(FaceDetectionResult face) {
+    final faceWidth = face.bounds.width;
+
+    // Optimal face size for medium resolution (720x480): ~150-300px width
+    // Too small faces are harder to recognize, too large may be cropped
+    if (faceWidth < 60) {
+      // Very small faces: poor quality
+      return (faceWidth / 60.0).clamp(0.0, 1.0);
+    } else if (faceWidth <= 150) {
+      // Small to medium faces: good quality
+      return 0.6 + ((faceWidth - 60) / 90.0) * 0.3; // Scale from 0.6 to 0.9
+    } else if (faceWidth <= 300) {
+      // Medium to large faces: excellent quality
+      return 0.9 + ((faceWidth - 150) / 150.0) * 0.1; // Scale from 0.9 to 1.0
+    } else {
+      // Very large faces: slightly reduced quality (may be cropped)
+      return math.max(0.8, 1.0 - ((faceWidth - 300) / 200.0) * 0.2);
+    }
   }
 
   /// Calculate blur score using Laplacian variance

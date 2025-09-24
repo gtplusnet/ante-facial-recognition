@@ -14,7 +14,7 @@ import 'embedding_strategy.dart';
 /// is not available or desired.
 @injectable
 class MockEmbeddingStrategy implements EmbeddingStrategy {
-  static const int outputSize = 128;
+  static const int outputSize = 192;  // Match MobileFaceNet output dimensions
   bool _isInitialized = false;
 
   @override

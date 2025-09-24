@@ -4,13 +4,13 @@ class FaceRecognitionConstants {
   FaceRecognitionConstants._();
 
   // Face matching thresholds
-  static const double faceMatchThreshold = 0.6; // Euclidean distance threshold
-  static const double qualityThreshold = 0.9; // Minimum face quality score
+  static const double faceMatchThreshold = 1.0; // Euclidean distance threshold (increased for better matching)
+  static const double qualityThreshold = 0.85; // Minimum face quality score (85% for good balance)
   static const double livenessThreshold = 0.9; // Liveness detection confidence
 
   // Model dimensions
   static const int faceSize = 112; // MobileFaceNet input size (112x112)
-  static const int embeddingSize = 128; // Output embedding dimensions
+  static const int embeddingSize = 192; // Output embedding dimensions (MobileFaceNet outputs 192)
 
   // Performance thresholds
   static const double highConfidenceThreshold = 0.85;

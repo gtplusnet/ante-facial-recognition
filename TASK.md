@@ -536,6 +536,23 @@ Each task is complete when:
 
 ---
 
+## Additional Issues Discovered and Fixed
+
+### Face Encoding Generation from Employee Photos - Fixed 2025-09-24
+**Issue**: Face detection failed for employee photos during sync, resulting in 0 face encodings stored
+**Root Cause**: `FaceDetectionService.detectFacesFromBytes()` expected raw pixel data (RGBA/NV21) but received JPEG compressed bytes
+**Solution**:
+- ✅ Added `detectFacesFromFilePath()` method using `InputImage.fromFilePath()` for JPEG/PNG files
+- ✅ Implemented temporary file handling in `FaceEncodingService.extractFromImageBytes()`
+- ✅ Added image orientation fix using `img.bakeOrientation()` for EXIF data
+- ✅ Created fallback mechanism with BGRA format conversion when file path method fails
+- ✅ Fixed compilation errors (removed duplicate FaceMatchResult, fixed ImageByteFormat enum)
+**Files Modified**:
+- `lib/features/face_detection/data/services/face_detection_service.dart`
+- `lib/features/face_recognition/data/services/face_encoding_service.dart`
+
+---
+
 **Document Version**: 1.0.0
 **Last Updated**: December 2024
 **Total Estimated Hours**: 1,150-1,200 hours

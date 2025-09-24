@@ -10,12 +10,16 @@ import '../../domain/repositories/camera_repository.dart';
 
 @singleton
 class CameraDataSource {
+  static CameraDataSource? _instance;
+  static bool _isInstanceInitialized = false;
+
   camera.CameraController? _controller;
   List<camera.CameraDescription>? _cameras;
   int _currentCameraIndex = 0;
   final StreamController<CameraState> _stateController =
       StreamController<CameraState>.broadcast();
   bool _isImageStreamActive = false;
+  bool _isInitializing = false;
 
   camera.CameraController? get controller => _controller;
   Stream<CameraState> get stateStream => _stateController.stream;
@@ -52,8 +56,36 @@ class CameraDataSource {
   }
 
   Future<void> initializeCamera([camera.CameraDescription? cameraDesc]) async {
+    // ENHANCED: Force complete reinitialization to apply MEDIUM resolution
+    Logger.info('🔄 CAMERA INIT: Force reinitializing camera to apply MEDIUM resolution settings');
+    _isInstanceInitialized = false;
+
+    // Prevent concurrent initializations
+    if (_isInitializing) {
+      Logger.warning('Camera initialization already in progress, skipping');
+      return;
+    }
+
+    _isInitializing = true;
     try {
       _stateController.add(CameraState.initializing);
+
+      // Properly dispose of any existing controller to unbind all use cases
+      if (_controller != null) {
+        Logger.info('Disposing existing camera controller before reinitializing');
+        if (_isImageStreamActive) {
+          try {
+            await _controller!.stopImageStream();
+            _isImageStreamActive = false;
+          } catch (e) {
+            Logger.warning('Error stopping image stream: $e');
+          }
+        }
+        await _controller!.dispose();
+        _controller = null;
+        // Add small delay to ensure proper cleanup
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
 
       camera.CameraDescription? cameraToUse = cameraDesc ?? currentCamera;
       if (cameraToUse == null) {
@@ -66,10 +98,12 @@ class CameraDataSource {
       }
 
       Logger.info('Initializing camera: ${cameraToUse.name}');
+      // Log stack trace to identify caller
+      Logger.debug('Camera initialization called from:\n${StackTrace.current.toString().split('\n').take(10).join('\n')}');
 
       _controller = camera.CameraController(
         cameraToUse,
-        camera.ResolutionPreset.high,
+        camera.ResolutionPreset.medium,  // Medium resolution (720x480) for better frontal face detection
         enableAudio: false,
         imageFormatGroup: camera.ImageFormatGroup.yuv420,
       );
@@ -77,12 +111,20 @@ class CameraDataSource {
       await _controller!.initialize();
       await _controller!.setFlashMode(camera.FlashMode.off);
 
-      Logger.success('Camera initialized successfully');
+      // ENHANCED LOGGING: Verify actual resolution being used
+      final actualResolution = _controller!.value.previewSize;
+      Logger.success('✅ CAMERA READY: Initialized successfully');
+      Logger.info('📐 RESOLUTION: ${actualResolution?.width.toInt()}x${actualResolution?.height.toInt()} (${_controller!.resolutionPreset})');
+      Logger.info('📷 CAMERA: ${cameraToUse.name} (${cameraToUse.lensDirection})');
+
+      _isInstanceInitialized = true;
       _stateController.add(CameraState.ready);
     } catch (e) {
       Logger.error('Failed to initialize camera', error: e);
       _stateController.add(CameraState.error);
       throw app_exceptions.CameraException(message: 'Failed to initialize camera: $e');
+    } finally {
+      _isInitializing = false;
     }
   }
 
@@ -198,6 +240,7 @@ class CameraDataSource {
 
       await _controller?.dispose();
       _controller = null;
+      _isInstanceInitialized = false;  // Reset singleton initialization state
       _stateController.add(CameraState.disposed);
 
       Logger.success('Camera resources disposed');

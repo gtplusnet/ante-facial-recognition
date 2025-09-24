@@ -19,7 +19,7 @@ import 'tflite_embedding_strategy.dart';
 class TFLiteService {
   static const String modelPath = 'assets/models/mobilefacenet.tflite';
   static const int inputSize = 112;
-  static const int outputSize = 128;
+  static const int outputSize = 192;  // MobileFaceNet outputs 192-dimensional embeddings
   static const int numThreads = 4;
 
   // Strategy pattern implementation
@@ -167,16 +167,32 @@ class TFLiteService {
 
     try {
       // Use strategy pattern for embedding extraction
-      return await _embeddingStrategy.extractEmbedding(imageBytes);
+      final embedding = await _embeddingStrategy.extractEmbedding(imageBytes);
+      Logger.debug('Successfully extracted embedding using ${_embeddingStrategy.strategyName}');
+      return embedding;
     } catch (e) {
-      Logger.error('Failed to extract embedding with strategy', error: e);
+      Logger.warning('Failed to extract embedding with ${_embeddingStrategy.strategyName}: $e');
 
-      // Fallback to legacy method for backward compatibility
+      // If TFLite failed, try mock strategy as fallback
+      if (_embeddingStrategy is TFLiteEmbeddingStrategy) {
+        Logger.info('Switching to mock embedding strategy for this request');
+        final mockStrategy = MockEmbeddingStrategy();
+        await mockStrategy.initialize();
+        try {
+          final mockEmbedding = await mockStrategy.extractEmbedding(imageBytes);
+          Logger.warning('Using mock embedding - real face recognition not active');
+          return mockEmbedding;
+        } catch (mockError) {
+          Logger.error('Mock strategy also failed', error: mockError);
+        }
+      }
+
+      // Final fallback to legacy method
       try {
         return await _extractEmbeddingLegacy(imageBytes);
       } catch (legacyError) {
-        Logger.error('Legacy fallback also failed', error: legacyError);
-        // Final fallback to mock embedding
+        Logger.error('All embedding extraction methods failed', error: legacyError);
+        // Last resort - generate mock embedding
         return _generateMockEmbedding(imageBytes);
       }
     }

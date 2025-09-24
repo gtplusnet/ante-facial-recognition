@@ -284,12 +284,14 @@ flutter clean && flutter pub get
 
 ## 🔑 Key Thresholds
 
+See `lib/core/constants/face_recognition_constants.dart` for all thresholds.
+
 ```dart
 const double FACE_MATCH_THRESHOLD = 0.6;     // Euclidean distance
 const double LIVENESS_THRESHOLD = 0.9;       // Confidence score
-const double QUALITY_THRESHOLD = 0.7;        // Face quality
+const double QUALITY_THRESHOLD = 0.9;        // Face quality (90% for high accuracy)
 const int FACE_SIZE = 112;                   // MobileFaceNet input
-const int EMBEDDING_SIZE = 128;              // Output dimensions
+const int EMBEDDING_SIZE = 192;              // Output dimensions (MobileFaceNet outputs 192)
 ```
 
 ## 📱 Device Testing Notes

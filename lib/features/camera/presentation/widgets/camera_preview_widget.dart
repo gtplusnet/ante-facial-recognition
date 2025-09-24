@@ -2,6 +2,7 @@ import 'package:camera/camera.dart' as camera;
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
+import '../../../../core/utils/logger.dart';
 import '../../../../core/widgets/app_error_widget.dart';
 import '../../../../core/widgets/app_loading_indicator.dart';
 import '../../data/datasources/camera_data_source.dart';
@@ -13,6 +14,7 @@ class CameraPreviewWidget extends StatefulWidget {
   final Function(camera.CameraImage)? onImage;
   final Widget? overlay;
   final bool showControls;
+  final bool autoInitialize;
 
   const CameraPreviewWidget({
     super.key,
@@ -20,6 +22,7 @@ class CameraPreviewWidget extends StatefulWidget {
     this.onImage,
     this.overlay,
     this.showControls = true,
+    this.autoInitialize = true,  // Default to true for backward compatibility
   });
 
   @override
@@ -34,7 +37,18 @@ class _CameraPreviewWidgetState extends State<CameraPreviewWidget>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _initializeCamera();
+    // Only initialize if autoInitialize is true and camera is not already initialized
+    if (widget.autoInitialize && !widget.cameraDataSource.isInitialized) {
+      // Delay to ensure proper widget tree setup
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _initializeCamera();
+      });
+    } else if (widget.cameraDataSource.isInitialized && widget.onImage != null) {
+      // If camera is already initialized, just start the image stream
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _startImageStream();
+      });
+    }
   }
 
   @override
@@ -56,18 +70,26 @@ class _CameraPreviewWidgetState extends State<CameraPreviewWidget>
     if (state == AppLifecycleState.inactive) {
       _stopImageStream();
     } else if (state == AppLifecycleState.resumed) {
-      _initializeCamera();
+      // Only reinitialize if autoInitialize is true
+      if (widget.autoInitialize) {
+        _initializeCamera();
+      } else if (widget.onImage != null) {
+        // Just restart the stream if camera is already initialized
+        _startImageStream();
+      }
     }
   }
 
   Future<void> _initializeCamera() async {
     try {
+      Logger.debug('CameraPreviewWidget: Initializing camera');
       await widget.cameraDataSource.initializeCamera();
-      if (widget.onImage != null) {
+      if (widget.onImage != null && mounted) {
         await _startImageStream();
       }
       if (mounted) setState(() {});
     } catch (e) {
+      Logger.error('CameraPreviewWidget: Failed to initialize camera', error: e);
       if (mounted) setState(() {});
     }
   }
@@ -78,7 +100,7 @@ class _CameraPreviewWidgetState extends State<CameraPreviewWidget>
         if (!_isProcessing && mounted) {
           _isProcessing = true;
           widget.onImage!(image);
-          Future.delayed(const Duration(milliseconds: 100), () {
+          Future.delayed(const Duration(milliseconds: 33), () {  // ~30 FPS for better detection
             _isProcessing = false;
           });
         }
@@ -91,7 +113,13 @@ class _CameraPreviewWidgetState extends State<CameraPreviewWidget>
   }
 
   Future<void> _disposeCamera() async {
-    await widget.cameraDataSource.dispose();
+    // Only dispose if autoInitialize is true (we own the camera)
+    if (widget.autoInitialize) {
+      await widget.cameraDataSource.dispose();
+    } else {
+      // Just stop the stream if we don't own the camera
+      await _stopImageStream();
+    }
   }
 
   Future<void> _switchCamera() async {
