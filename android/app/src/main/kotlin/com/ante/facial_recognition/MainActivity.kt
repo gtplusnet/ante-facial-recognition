@@ -2,6 +2,7 @@ package com.ante.facial_recognition
 
 import android.os.Bundle
 import android.util.Log
+import android.view.WindowManager
 import androidx.annotation.NonNull
 import androidx.lifecycle.LifecycleOwner
 import io.flutter.embedding.android.FlutterActivity
@@ -17,12 +18,14 @@ class MainActivity : FlutterActivity(), LifecycleOwner {
     companion object {
         private const val CAMERAX_CHANNEL = "com.ante.facial_recognition/camerax"
         private const val RENDER_CHANNEL = "com.ante.facial_recognition/render"
+        private const val SCREEN_CHANNEL = "com.ante.facial_recognition/screen"
         private const val TAG = "MainActivity"
     }
 
     private lateinit var cameraXHandler: CameraXHandler
     private lateinit var methodChannel: MethodChannel
     private lateinit var renderChannel: MethodChannel
+    private lateinit var screenChannel: MethodChannel
     private var hasSeLinuxRestrictions: Boolean = false
 
     override fun configureFlutterEngine(@NonNull flutterEngine: FlutterEngine) {
@@ -56,6 +59,19 @@ class MainActivity : FlutterActivity(), LifecycleOwner {
             }
         }
 
+        // Set up screen control channel
+        screenChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, SCREEN_CHANNEL)
+        screenChannel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "keepScreenOn" -> {
+                    val keepOn = call.arguments as? Boolean ?: false
+                    setKeepScreenOn(keepOn)
+                    result.success(null)
+                }
+                else -> result.notImplemented()
+            }
+        }
+
         // Set up callback for image stream
         cameraXHandler.setImageCallback { frameData, width, height ->
             runOnUiThread {
@@ -73,6 +89,7 @@ class MainActivity : FlutterActivity(), LifecycleOwner {
     override fun cleanUpFlutterEngine(@NonNull flutterEngine: FlutterEngine) {
         methodChannel.setMethodCallHandler(null)
         renderChannel.setMethodCallHandler(null)
+        screenChannel.setMethodCallHandler(null)
         super.cleanUpFlutterEngine(flutterEngine)
     }
 
@@ -181,5 +198,20 @@ class MainActivity : FlutterActivity(), LifecycleOwner {
             "androidVersion" to android.os.Build.VERSION.SDK_INT,
             "manufacturer" to android.os.Build.MANUFACTURER
         )
+    }
+
+    /**
+     * Control screen keep-awake state
+     */
+    private fun setKeepScreenOn(keepOn: Boolean) {
+        runOnUiThread {
+            if (keepOn) {
+                window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                Log.i(TAG, "Screen keep-awake enabled")
+            } else {
+                window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                Log.i(TAG, "Screen keep-awake disabled")
+            }
+        }
     }
 }

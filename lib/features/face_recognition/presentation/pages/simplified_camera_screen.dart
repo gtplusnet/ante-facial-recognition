@@ -10,11 +10,13 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:google_mlkit_commons/google_mlkit_commons.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:visibility_detector/visibility_detector.dart';
+// import 'package:wakelock_plus/wakelock_plus.dart'; // Temporarily disabled
 
 import '../../../../core/di/injection.dart';
 import '../../../../core/platform/render_aware_widget.dart';
 import '../../../../core/router/app_router.dart';
 import '../../../../core/utils/logger.dart';
+import '../../../../core/utils/screen_keeper.dart';
 import '../../../employee/domain/entities/employee.dart';
 import '../../../employee/presentation/bloc/employee_bloc.dart';
 import '../../../employee/presentation/bloc/employee_event.dart' as employee_events;
@@ -104,6 +106,9 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
+    // Keep screen on using platform channel
+    ScreenKeeper.enableKeepAwake();
+
     // Initialize face recognition service
     _faceRecognitionService = getIt<SimplifiedFaceRecognitionService>();
 
@@ -127,6 +132,10 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
     _disposeCamera();
     _faceDetector.close();
     _restoreSystemUI();
+
+    // Disable screen keep-awake when leaving the screen
+    ScreenKeeper.disableKeepAwake();
+
     super.dispose();
   }
 

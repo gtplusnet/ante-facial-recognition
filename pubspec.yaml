@@ -78,6 +78,7 @@ dependencies:
   dartz: ^0.10.1
   image: ^4.3.0
   collection: ^1.18.0
+  # wakelock_plus: ^1.4.0  # Temporarily disabled due to build issue
 
   # Audio & Haptic Feedback
   audioplayers: ^6.1.0
