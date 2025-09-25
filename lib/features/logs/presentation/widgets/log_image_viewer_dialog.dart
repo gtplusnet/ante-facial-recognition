@@ -2,8 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:intl/intl.dart';
 
+import '../../../../core/config/face_recognition_config.dart';
+import '../../../../core/di/injection.dart';
 import '../../../../core/utils/logger.dart';
+import '../../../face_recognition/data/services/simplified_face_recognition_service.dart';
+import '../../../face_recognition/presentation/widgets/employee_confirmation_dialog.dart';
 import '../../data/models/face_recognition_log_model.dart';
+import '../../data/services/face_recognition_log_service.dart';
 
 class LogImageViewerDialog extends StatefulWidget {
   final FaceRecognitionLogModel log;
@@ -37,6 +42,9 @@ class _LogImageViewerDialogState extends State<LogImageViewerDialog>
 
   bool _showDetails = true;
   bool _showImageError = false;
+  bool _isReprocessing = false;
+  FaceRecognitionResult? _reprocessedResult;
+  final FaceRecognitionConfig _config = FaceRecognitionConfig();
 
   @override
   void initState() {
@@ -473,6 +481,35 @@ class _LogImageViewerDialogState extends State<LogImageViewerDialog>
 
           SizedBox(height: 8.h),
 
+          // Re-process face recognition button
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.black.withOpacity(0.5),
+              shape: BoxShape.circle,
+            ),
+            child: IconButton(
+              onPressed: _isReprocessing || !widget.log.hasImage
+                  ? null
+                  : _reprocessFaceRecognition,
+              icon: _isReprocessing
+                ? SizedBox(
+                    width: 20.sp,
+                    height: 20.sp,
+                    child: CircularProgressIndicator(
+                      color: Colors.white,
+                      strokeWidth: 2,
+                    ),
+                  )
+                : Icon(
+                    Icons.face_retouching_natural,
+                    color: widget.log.hasImage ? Colors.white : Colors.grey,
+                  ),
+              tooltip: 'Re-process face recognition',
+            ),
+          ),
+
+          SizedBox(height: 8.h),
+
           // Toggle details button
           Container(
             decoration: BoxDecoration(
@@ -488,6 +525,370 @@ class _LogImageViewerDialogState extends State<LogImageViewerDialog>
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Future<void> _reprocessFaceRecognition() async {
+    if (!widget.log.hasImage || widget.log.faceImage == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No image available for re-processing'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    setState(() => _isReprocessing = true);
+
+    try {
+      // Get services
+      final faceRecognitionService = getIt<SimplifiedFaceRecognitionService>();
+      final logService = getIt<FaceRecognitionLogService>();
+
+      Logger.info('Re-processing face recognition for log ${widget.log.id}');
+      Logger.info('Using config - Confidence: ${_config.confidenceThreshold}, Quality: ${_config.qualityThreshold}');
+
+      // Process the stored image
+      final stopwatch = Stopwatch()..start();
+      final result = await faceRecognitionService.processImageBytes(
+        widget.log.faceImage!,
+      );
+      stopwatch.stop();
+
+      if (result != null) {
+        // Update the log with new results
+        await logService.updateLog(
+          widget.log.id!,
+          result: result,
+          processingTimeMs: stopwatch.elapsedMilliseconds,
+          additionalMetadata: {
+            'reprocess_reason': 'manual_retry',
+            'config_confidence': _config.confidenceThreshold,
+            'config_quality': _config.qualityThreshold,
+          },
+        );
+
+        setState(() => _reprocessedResult = result);
+
+        // Show appropriate feedback based on result
+        if (result.type == FaceRecognitionResultType.matched && result.employee != null) {
+          // Show success dialog
+          if (mounted) {
+            EmployeeConfirmationDialog.show(
+              context: context,
+              employee: result.employee!,
+              confidence: result.confidence ?? 0.0,
+              currentStatus: null,
+            );
+          }
+        } else if (result.type == FaceRecognitionResultType.unknown) {
+          _showResultDialog(
+            title: 'Face Not Recognized',
+            message: 'The face in this image was not found in the employee database.',
+            resultType: result.type,
+            quality: result.quality,
+          );
+        } else if (result.type == FaceRecognitionResultType.poorQuality) {
+          _showResultDialog(
+            title: 'Poor Image Quality',
+            message: result.message ?? 'Poor image quality',
+            resultType: result.type,
+            quality: result.quality,
+          );
+        } else if (result.type == FaceRecognitionResultType.noFace) {
+          _showResultDialog(
+            title: 'No Face Detected',
+            message: 'No face was detected in this image. The image may be unclear or the face may be too small.',
+            resultType: result.type,
+            quality: result.quality,
+          );
+        } else if (result.type == FaceRecognitionResultType.error) {
+          _showResultDialog(
+            title: 'Processing Error',
+            message: result.message ?? 'An error occurred during processing',
+            resultType: result.type,
+            quality: result.quality,
+            isError: true,
+          );
+        }
+
+        Logger.success('Re-processing complete: ${result.type}');
+      } else {
+        _showResultDialog(
+          title: 'Processing Failed',
+          message: 'Failed to process the image. Please try again.',
+          resultType: FaceRecognitionResultType.error,
+          isError: true,
+        );
+      }
+    } catch (e) {
+      Logger.error('Re-processing failed', error: e);
+      _showResultDialog(
+        title: 'Processing Error',
+        message: 'Re-processing failed: ${e.toString()}',
+        resultType: FaceRecognitionResultType.error,
+        isError: true,
+      );
+    } finally {
+      setState(() => _isReprocessing = false);
+    }
+  }
+
+  void _showResultDialog({
+    required String title,
+    required String message,
+    required FaceRecognitionResultType resultType,
+    double? quality,
+    double? confidence,
+    bool isError = false,
+  }) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(
+              _getResultIcon(resultType),
+              color: _getResultColor(resultType),
+              size: 28.sp,
+            ),
+            SizedBox(width: 12.w),
+            Expanded(
+              child: Text(
+                title,
+                style: TextStyle(
+                  fontSize: 20.sp,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                message,
+                style: TextStyle(
+                  fontSize: 16.sp,
+                  color: Colors.grey[700],
+                ),
+              ),
+              if (quality != null) ...[
+                SizedBox(height: 16.h),
+                _buildQualityInfo(quality),
+              ],
+              if (confidence != null) ...[
+                SizedBox(height: 12.h),
+                _buildConfidenceInfo(confidence),
+              ],
+              if (resultType == FaceRecognitionResultType.poorQuality) ...[
+                SizedBox(height: 16.h),
+                Container(
+                  padding: EdgeInsets.all(12.w),
+                  decoration: BoxDecoration(
+                    color: Colors.orange[50],
+                    borderRadius: BorderRadius.circular(8.r),
+                    border: Border.all(color: Colors.orange[200]!),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Why is the quality low?',
+                        style: TextStyle(
+                          fontSize: 14.sp,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.orange[900],
+                        ),
+                      ),
+                      SizedBox(height: 8.h),
+                      Text(
+                        'The stored image may have:\n'
+                        '• Face too small in the frame\n'
+                        '• Poor lighting conditions\n'
+                        '• Blurry or out of focus\n'
+                        '• Face at an angle',
+                        style: TextStyle(
+                          fontSize: 13.sp,
+                          color: Colors.orange[800],
+                          height: 1.4,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        actions: [
+          if (resultType == FaceRecognitionResultType.poorQuality)
+            FilledButton.tonal(
+              onPressed: () {
+                Navigator.of(context).pop();
+                // Temporarily lower quality threshold and retry
+                final originalThreshold = _config.qualityThreshold;
+                _config.qualityThreshold = 0.3; // Lower threshold
+                _reprocessFaceRecognition().then((_) {
+                  // Restore original threshold
+                  _config.qualityThreshold = originalThreshold;
+                });
+              },
+              child: const Text('Retry with Lower Threshold'),
+            ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildQualityInfo(double quality) {
+    final qualityPercent = (quality * 100).toStringAsFixed(1);
+    final thresholdPercent = (_config.qualityThreshold * 100).toStringAsFixed(0);
+    final isAcceptable = quality >= _config.qualityThreshold;
+
+    return Container(
+      padding: EdgeInsets.all(12.w),
+      decoration: BoxDecoration(
+        color: isAcceptable ? Colors.green[50] : Colors.red[50],
+        borderRadius: BorderRadius.circular(8.r),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            isAcceptable ? Icons.check_circle : Icons.warning,
+            color: isAcceptable ? Colors.green : Colors.red,
+            size: 20.sp,
+          ),
+          SizedBox(width: 8.w),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Face Quality Score',
+                  style: TextStyle(
+                    fontSize: 12.sp,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.grey[700],
+                  ),
+                ),
+                SizedBox(height: 4.h),
+                RichText(
+                  text: TextSpan(
+                    children: [
+                      TextSpan(
+                        text: '$qualityPercent%',
+                        style: TextStyle(
+                          fontSize: 16.sp,
+                          fontWeight: FontWeight.bold,
+                          color: isAcceptable ? Colors.green[700] : Colors.red[700],
+                        ),
+                      ),
+                      TextSpan(
+                        text: ' (Required: $thresholdPercent%)',
+                        style: TextStyle(
+                          fontSize: 14.sp,
+                          color: Colors.grey[600],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildConfidenceInfo(double confidence) {
+    final confidencePercent = (confidence * 100).toStringAsFixed(1);
+
+    return Container(
+      padding: EdgeInsets.all(12.w),
+      decoration: BoxDecoration(
+        color: Colors.blue[50],
+        borderRadius: BorderRadius.circular(8.r),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.verified,
+            color: Colors.blue,
+            size: 20.sp,
+          ),
+          SizedBox(width: 8.w),
+          Text(
+            'Match Confidence: ',
+            style: TextStyle(
+              fontSize: 14.sp,
+              color: Colors.grey[700],
+            ),
+          ),
+          Text(
+            '$confidencePercent%',
+            style: TextStyle(
+              fontSize: 16.sp,
+              fontWeight: FontWeight.bold,
+              color: Colors.blue[700],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  IconData _getResultIcon(FaceRecognitionResultType type) {
+    switch (type) {
+      case FaceRecognitionResultType.matched:
+        return Icons.check_circle;
+      case FaceRecognitionResultType.unknown:
+        return Icons.help_outline;
+      case FaceRecognitionResultType.poorQuality:
+        return Icons.image_not_supported;
+      case FaceRecognitionResultType.noFace:
+        return Icons.face_retouching_off;
+      case FaceRecognitionResultType.error:
+        return Icons.error_outline;
+      default:
+        return Icons.info_outline;
+    }
+  }
+
+  Color _getResultColor(FaceRecognitionResultType type) {
+    switch (type) {
+      case FaceRecognitionResultType.matched:
+        return Colors.green;
+      case FaceRecognitionResultType.unknown:
+        return Colors.orange;
+      case FaceRecognitionResultType.poorQuality:
+        return Colors.orange;
+      case FaceRecognitionResultType.noFace:
+        return Colors.grey;
+      case FaceRecognitionResultType.error:
+        return Colors.red;
+      default:
+        return Colors.blue;
+    }
+  }
+
+  void _showSnackBar(String message, Color backgroundColor) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: backgroundColor,
+        duration: const Duration(seconds: 3),
       ),
     );
   }

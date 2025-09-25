@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
@@ -319,6 +320,70 @@ class FaceRecognitionLogService {
       Logger.info('Cleaned up $logsToDelete old log entries');
     } catch (e) {
       Logger.error('Failed to cleanup old logs', error: e);
+    }
+  }
+
+  /// Update an existing log with new recognition results
+  Future<void> updateLog(
+    int logId, {
+    required FaceRecognitionResult result,
+    required int processingTimeMs,
+    Map<String, dynamic>? additionalMetadata,
+  }) async {
+    try {
+      Logger.info('Updating face recognition log $logId with new results');
+      final db = await _databaseHelper.database;
+
+      // Get existing log
+      final existingLogs = await db.query(
+        _tableName,
+        where: 'id = ?',
+        whereArgs: [logId],
+        limit: 1,
+      );
+
+      if (existingLogs.isEmpty) {
+        throw Exception('Log with ID $logId not found');
+      }
+
+      final existingLog = FaceRecognitionLogModel.fromDatabase(existingLogs.first);
+
+      // Merge metadata - preserve original data and add re-processing info
+      final updatedMetadata = {
+        ...?existingLog.metadata,
+        ...?additionalMetadata,
+        'reprocessed_at': DateTime.now().toIso8601String(),
+        'reprocess_count': ((existingLog.metadata?['reprocess_count'] ?? 0) as int) + 1,
+        'original_result_type': existingLog.metadata?['original_result_type'] ?? existingLog.resultType.name,
+        'original_confidence': existingLog.metadata?['original_confidence'] ?? existingLog.confidence,
+        'original_employee_id': existingLog.metadata?['original_employee_id'] ?? existingLog.employeeId,
+        'original_employee_name': existingLog.metadata?['original_employee_name'] ?? existingLog.employeeName,
+        'original_quality': existingLog.metadata?['original_quality'] ?? existingLog.quality,
+      };
+
+      // Update log with new results
+      final updateData = {
+        'result_type': result.type.name,
+        'employee_id': result.employee?.id,
+        'employee_name': result.employee?.name,
+        'confidence': result.confidence,
+        'quality': result.quality,
+        'processing_time_ms': processingTimeMs,
+        'error_message': result.message,
+        'metadata': json.encode(updatedMetadata),
+      };
+
+      await db.update(
+        _tableName,
+        updateData,
+        where: 'id = ?',
+        whereArgs: [logId],
+      );
+
+      Logger.success('Updated log $logId - Result: ${result.type}, Employee: ${result.employee?.name}');
+    } catch (e) {
+      Logger.error('Failed to update log $logId', error: e);
+      throw e;
     }
   }
 

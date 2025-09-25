@@ -1,127 +1,300 @@
-import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
-/// Configuration for face recognition system
+import '../utils/logger.dart';
+
+/// Centralized configuration for face recognition parameters
+/// Allows runtime adjustment of thresholds for testing and optimization
 class FaceRecognitionConfig {
-  // ============== Recognition Thresholds ==============
+  // Singleton pattern for global access
+  static final FaceRecognitionConfig _instance = FaceRecognitionConfig._internal();
+  factory FaceRecognitionConfig() => _instance;
+  FaceRecognitionConfig._internal();
 
-  /// Default threshold for face matching (Euclidean distance)
-  /// Lower values mean stricter matching
+  // ========== Face Matching Thresholds ==========
+  /// Confidence threshold for face matching (0.0 - 1.0)
+  /// Higher values require closer matches
+  double confidenceThreshold = 0.7;
+
+  /// Minimum face quality score required for processing (0.0 - 1.0)
+  /// Lower quality faces will be rejected
+  double qualityThreshold = 0.8;
+
+  /// Maximum Euclidean distance for face matching
+  /// Lower values require closer matches
+  double faceMatchDistance = 0.6;
+
+  // ========== Processing Parameters ==========
+  /// Maximum time allowed for face processing (milliseconds)
+  int maxProcessingTimeMs = 1000;
+
+  /// Number of camera frames to skip between processing
+  /// Higher values reduce CPU usage but may miss faces
+  int frameSkipCount = 5;
+
+  /// Processing interval between frames (milliseconds)
+  int processingIntervalMs = 800;
+
+  // ========== Face Detection Parameters ==========
+  /// Minimum face size as percentage of image (0.0 - 1.0)
+  double minFaceSize = 0.05; // 5% of image
+
+  /// Minimum face area ratio relative to image
+  double minFaceAreaRatio = 0.1;
+
+  /// Maximum face area ratio relative to image
+  double maxFaceAreaRatio = 0.8;
+
+  // ========== Quality Calculation Weights ==========
+  /// Weight for face size score in quality calculation
+  double sizeScoreWeight = 0.7;
+
+  /// Weight for face center position score in quality calculation
+  double centerScoreWeight = 0.3;
+
+  /// Power factor for size score calculation (gentler penalties)
+  double sizeScorePower = 0.7;
+
+  // ========== Recognition Cooldowns ==========
+  /// Cooldown period after successful recognition
+  Duration recognitionCooldown = const Duration(seconds: 5);
+
+  /// Cooldown period after failed recognition
+  Duration failedRecognitionCooldown = const Duration(seconds: 3);
+
+  // ========== Error Handling ==========
+  /// Maximum consecutive errors before pausing
+  int maxConsecutiveErrors = 5;
+
+  /// Cooldown duration after max errors reached
+  Duration errorCooldownDuration = const Duration(seconds: 10);
+
+  /// Maximum camera restart attempts
+  int maxCameraRestarts = 3;
+
+  // ========== UI Feedback ==========
+  /// Duration to display feedback messages
+  Duration feedbackDisplayDuration = const Duration(seconds: 3);
+
+  /// Auto-dismiss timer for dialogs (seconds)
+  int autoDialogDismissSeconds = 3;
+
+  // ========== Storage Keys ==========
+  static const String _storagePrefix = 'face_recognition_config_';
+
+  /// Update configuration values
+  void updateConfig({
+    double? confidenceThreshold,
+    double? qualityThreshold,
+    double? faceMatchDistance,
+    int? maxProcessingTimeMs,
+    int? frameSkipCount,
+    int? processingIntervalMs,
+    double? minFaceSize,
+    double? minFaceAreaRatio,
+    double? maxFaceAreaRatio,
+    double? sizeScoreWeight,
+    double? centerScoreWeight,
+    double? sizeScorePower,
+    Duration? recognitionCooldown,
+    Duration? failedRecognitionCooldown,
+    int? maxConsecutiveErrors,
+    Duration? errorCooldownDuration,
+    int? maxCameraRestarts,
+    Duration? feedbackDisplayDuration,
+    int? autoDialogDismissSeconds,
+  }) {
+    if (confidenceThreshold != null) this.confidenceThreshold = confidenceThreshold;
+    if (qualityThreshold != null) this.qualityThreshold = qualityThreshold;
+    if (faceMatchDistance != null) this.faceMatchDistance = faceMatchDistance;
+    if (maxProcessingTimeMs != null) this.maxProcessingTimeMs = maxProcessingTimeMs;
+    if (frameSkipCount != null) this.frameSkipCount = frameSkipCount;
+    if (processingIntervalMs != null) this.processingIntervalMs = processingIntervalMs;
+    if (minFaceSize != null) this.minFaceSize = minFaceSize;
+    if (minFaceAreaRatio != null) this.minFaceAreaRatio = minFaceAreaRatio;
+    if (maxFaceAreaRatio != null) this.maxFaceAreaRatio = maxFaceAreaRatio;
+    if (sizeScoreWeight != null) this.sizeScoreWeight = sizeScoreWeight;
+    if (centerScoreWeight != null) this.centerScoreWeight = centerScoreWeight;
+    if (sizeScorePower != null) this.sizeScorePower = sizeScorePower;
+    if (recognitionCooldown != null) this.recognitionCooldown = recognitionCooldown;
+    if (failedRecognitionCooldown != null) this.failedRecognitionCooldown = failedRecognitionCooldown;
+    if (maxConsecutiveErrors != null) this.maxConsecutiveErrors = maxConsecutiveErrors;
+    if (errorCooldownDuration != null) this.errorCooldownDuration = errorCooldownDuration;
+    if (maxCameraRestarts != null) this.maxCameraRestarts = maxCameraRestarts;
+    if (feedbackDisplayDuration != null) this.feedbackDisplayDuration = feedbackDisplayDuration;
+    if (autoDialogDismissSeconds != null) this.autoDialogDismissSeconds = autoDialogDismissSeconds;
+
+    Logger.info('Face recognition config updated');
+    logCurrentConfig();
+  }
+
+  /// Load configuration from persistent storage
+  Future<void> loadFromStorage() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+
+      confidenceThreshold = prefs.getDouble('${_storagePrefix}confidenceThreshold') ?? confidenceThreshold;
+      qualityThreshold = prefs.getDouble('${_storagePrefix}qualityThreshold') ?? qualityThreshold;
+      faceMatchDistance = prefs.getDouble('${_storagePrefix}faceMatchDistance') ?? faceMatchDistance;
+      maxProcessingTimeMs = prefs.getInt('${_storagePrefix}maxProcessingTimeMs') ?? maxProcessingTimeMs;
+      frameSkipCount = prefs.getInt('${_storagePrefix}frameSkipCount') ?? frameSkipCount;
+      processingIntervalMs = prefs.getInt('${_storagePrefix}processingIntervalMs') ?? processingIntervalMs;
+      minFaceSize = prefs.getDouble('${_storagePrefix}minFaceSize') ?? minFaceSize;
+      minFaceAreaRatio = prefs.getDouble('${_storagePrefix}minFaceAreaRatio') ?? minFaceAreaRatio;
+      maxFaceAreaRatio = prefs.getDouble('${_storagePrefix}maxFaceAreaRatio') ?? maxFaceAreaRatio;
+      sizeScoreWeight = prefs.getDouble('${_storagePrefix}sizeScoreWeight') ?? sizeScoreWeight;
+      centerScoreWeight = prefs.getDouble('${_storagePrefix}centerScoreWeight') ?? centerScoreWeight;
+      sizeScorePower = prefs.getDouble('${_storagePrefix}sizeScorePower') ?? sizeScorePower;
+      maxConsecutiveErrors = prefs.getInt('${_storagePrefix}maxConsecutiveErrors') ?? maxConsecutiveErrors;
+      maxCameraRestarts = prefs.getInt('${_storagePrefix}maxCameraRestarts') ?? maxCameraRestarts;
+      autoDialogDismissSeconds = prefs.getInt('${_storagePrefix}autoDialogDismissSeconds') ?? autoDialogDismissSeconds;
+
+      // Duration values stored as milliseconds
+      final recognitionCooldownMs = prefs.getInt('${_storagePrefix}recognitionCooldownMs');
+      if (recognitionCooldownMs != null) {
+        recognitionCooldown = Duration(milliseconds: recognitionCooldownMs);
+      }
+
+      final failedRecognitionCooldownMs = prefs.getInt('${_storagePrefix}failedRecognitionCooldownMs');
+      if (failedRecognitionCooldownMs != null) {
+        failedRecognitionCooldown = Duration(milliseconds: failedRecognitionCooldownMs);
+      }
+
+      final errorCooldownDurationMs = prefs.getInt('${_storagePrefix}errorCooldownDurationMs');
+      if (errorCooldownDurationMs != null) {
+        errorCooldownDuration = Duration(milliseconds: errorCooldownDurationMs);
+      }
+
+      final feedbackDisplayDurationMs = prefs.getInt('${_storagePrefix}feedbackDisplayDurationMs');
+      if (feedbackDisplayDurationMs != null) {
+        feedbackDisplayDuration = Duration(milliseconds: feedbackDisplayDurationMs);
+      }
+
+      Logger.info('Face recognition config loaded from storage');
+      logCurrentConfig();
+    } catch (e) {
+      Logger.error('Failed to load config from storage', error: e);
+    }
+  }
+
+  /// Save configuration to persistent storage
+  Future<void> saveToStorage() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+
+      await prefs.setDouble('${_storagePrefix}confidenceThreshold', confidenceThreshold);
+      await prefs.setDouble('${_storagePrefix}qualityThreshold', qualityThreshold);
+      await prefs.setDouble('${_storagePrefix}faceMatchDistance', faceMatchDistance);
+      await prefs.setInt('${_storagePrefix}maxProcessingTimeMs', maxProcessingTimeMs);
+      await prefs.setInt('${_storagePrefix}frameSkipCount', frameSkipCount);
+      await prefs.setInt('${_storagePrefix}processingIntervalMs', processingIntervalMs);
+      await prefs.setDouble('${_storagePrefix}minFaceSize', minFaceSize);
+      await prefs.setDouble('${_storagePrefix}minFaceAreaRatio', minFaceAreaRatio);
+      await prefs.setDouble('${_storagePrefix}maxFaceAreaRatio', maxFaceAreaRatio);
+      await prefs.setDouble('${_storagePrefix}sizeScoreWeight', sizeScoreWeight);
+      await prefs.setDouble('${_storagePrefix}centerScoreWeight', centerScoreWeight);
+      await prefs.setDouble('${_storagePrefix}sizeScorePower', sizeScorePower);
+      await prefs.setInt('${_storagePrefix}maxConsecutiveErrors', maxConsecutiveErrors);
+      await prefs.setInt('${_storagePrefix}maxCameraRestarts', maxCameraRestarts);
+      await prefs.setInt('${_storagePrefix}autoDialogDismissSeconds', autoDialogDismissSeconds);
+
+      // Save durations as milliseconds
+      await prefs.setInt('${_storagePrefix}recognitionCooldownMs', recognitionCooldown.inMilliseconds);
+      await prefs.setInt('${_storagePrefix}failedRecognitionCooldownMs', failedRecognitionCooldown.inMilliseconds);
+      await prefs.setInt('${_storagePrefix}errorCooldownDurationMs', errorCooldownDuration.inMilliseconds);
+      await prefs.setInt('${_storagePrefix}feedbackDisplayDurationMs', feedbackDisplayDuration.inMilliseconds);
+
+      Logger.info('Face recognition config saved to storage');
+    } catch (e) {
+      Logger.error('Failed to save config to storage', error: e);
+    }
+  }
+
+  /// Reset configuration to default values
+  void resetToDefaults() {
+    confidenceThreshold = 0.7;
+    qualityThreshold = 0.8;
+    faceMatchDistance = 0.6;
+    maxProcessingTimeMs = 1000;
+    frameSkipCount = 5;
+    processingIntervalMs = 800;
+    minFaceSize = 0.05;
+    minFaceAreaRatio = 0.1;
+    maxFaceAreaRatio = 0.8;
+    sizeScoreWeight = 0.7;
+    centerScoreWeight = 0.3;
+    sizeScorePower = 0.7;
+    recognitionCooldown = const Duration(seconds: 5);
+    failedRecognitionCooldown = const Duration(seconds: 3);
+    maxConsecutiveErrors = 5;
+    errorCooldownDuration = const Duration(seconds: 10);
+    maxCameraRestarts = 3;
+    feedbackDisplayDuration = const Duration(seconds: 3);
+    autoDialogDismissSeconds = 3;
+
+    Logger.info('Face recognition config reset to defaults');
+    logCurrentConfig();
+  }
+
+  /// Log current configuration values
+  void logCurrentConfig() {
+    Logger.info('=== Face Recognition Configuration ===');
+    Logger.info('Confidence Threshold: $confidenceThreshold');
+    Logger.info('Quality Threshold: $qualityThreshold');
+    Logger.info('Face Match Distance: $faceMatchDistance');
+    Logger.info('Max Processing Time: ${maxProcessingTimeMs}ms');
+    Logger.info('Frame Skip Count: $frameSkipCount');
+    Logger.info('Processing Interval: ${processingIntervalMs}ms');
+    Logger.info('Min Face Size: ${(minFaceSize * 100).toStringAsFixed(1)}%');
+    Logger.info('Face Area Ratio: ${(minFaceAreaRatio * 100).toStringAsFixed(1)}% - ${(maxFaceAreaRatio * 100).toStringAsFixed(1)}%');
+    Logger.info('Quality Weights - Size: ${(sizeScoreWeight * 100).toStringAsFixed(0)}%, Center: ${(centerScoreWeight * 100).toStringAsFixed(0)}%');
+    Logger.info('Recognition Cooldown: ${recognitionCooldown.inSeconds}s');
+    Logger.info('Failed Recognition Cooldown: ${failedRecognitionCooldown.inSeconds}s');
+    Logger.info('=====================================');
+  }
+
+  // ========== Legacy Properties (for backward compatibility) ==========
+  // These are used by old code that hasn't been migrated yet
   static const double defaultMatchThreshold = 0.6;
-
-  /// Strict threshold for high-security scenarios
-  static const double strictMatchThreshold = 0.4;
-
-  /// Lenient threshold for low-security scenarios
-  static const double lenientMatchThreshold = 0.8;
-
-  /// Threshold for cosine similarity (alternative metric)
-  /// Higher values mean better match
-  static const double cosineSimilarityThreshold = 0.85;
-
-  // ============== Quality Thresholds ==============
-
-  /// Minimum face quality score for recognition
-  static const double minFaceQuality = 0.9;
-
-  /// Minimum confidence for face detection
-  static const double minDetectionConfidence = 0.8;
-
-  /// Minimum face size relative to image
-  static const double minFaceSize = 0.15;
-
-  /// Maximum face angle for recognition (degrees)
-  static const double maxFaceAngle = 30.0;
-
-  // ============== Liveness Detection ==============
-
-  /// Liveness detection threshold
-  static const double livenessThreshold = 0.9;
-
-  /// Enable passive liveness detection
-  static const bool enableLivenessDetection = true;
-
-  /// Number of frames for liveness analysis
-  static const int livenessFrameCount = 5;
-
-  // ============== Processing Settings ==============
-
-  /// Face image size for processing (MobileFaceNet input)
-  static const int faceImageSize = 112;
-
-  /// Face embedding dimensions (MobileFaceNet output)
-  static const int embeddingDimensions = 128;
-
-  /// Maximum faces to detect in a frame
-  static const int maxFacesToDetect = 5;
-
-  /// Frame skip interval for performance
-  static const int frameSkipInterval = 3;
-
-  /// Enable GPU acceleration
-  static const bool useGpuAcceleration = true;
-
-  // ============== Matching Settings ==============
-
-  /// Number of top matches to return
   static const int topKMatches = 3;
+  static const bool enableLivenessDetection = false;
+  static const double livenessThreshold = 0.9;
+  static const int embeddingDimensions = 128;
+  static const bool requireGoodLighting = false;
 
-  /// Cache face encodings in memory
-  static const bool cacheEncodings = true;
+  // Legacy methods for old code compatibility
+  static bool isValidMatch(double distance, {double? customThreshold}) {
+    final threshold = customThreshold ?? defaultMatchThreshold;
+    return distance <= threshold;
+  }
 
-  /// Maximum cache size (number of encodings)
-  static const int maxCacheSize = 1000;
+  static double getCombinedConfidence({
+    required double euclideanDistance,
+    required double cosineSimilarity,
+    required double faceQuality,
+  }) {
+    const double euclideanWeight = 0.5;
+    const double cosineWeight = 0.3;
+    const double qualityWeight = 0.2;
 
-  /// Cache expiry time (hours)
-  static const int cacheExpiryHours = 24;
+    final euclideanConfidence = 1.0 - euclideanDistance.clamp(0.0, 1.0);
 
-  // ============== Performance Settings ==============
+    return (euclideanConfidence * euclideanWeight) +
+           (cosineSimilarity * cosineWeight) +
+           (faceQuality * qualityWeight);
+  }
 
-  /// Process images in isolate
-  static const bool useIsolateProcessing = true;
+  static MatchQuality getMatchQuality(double distance) {
+    if (distance <= 0.4) {
+      return MatchQuality.excellent;
+    } else if (distance <= 0.6) {
+      return MatchQuality.good;
+    } else if (distance <= 0.8) {
+      return MatchQuality.fair;
+    } else {
+      return MatchQuality.poor;
+    }
+  }
 
-  /// Image processing quality (0.0 - 1.0)
-  static const double imageProcessingQuality = 0.8;
-
-  /// Maximum processing time per frame (milliseconds)
-  static const int maxProcessingTimeMs = 200;
-
-  /// Batch size for encoding updates
-  static const int encodingBatchSize = 10;
-
-  // ============== Security Settings ==============
-
-  /// Enable anti-spoofing checks
-  static const bool enableAntiSpoofing = true;
-
-  /// Store face images (privacy consideration)
-  static const bool storeFaceImages = false;
-
-  /// Encrypt face encodings
-  static const bool encryptEncodings = true;
-
-  /// Require minimum lighting conditions
-  static const bool requireGoodLighting = true;
-
-  // ============== User Experience ==============
-
-  /// Show face detection overlay
-  static const bool showFaceOverlay = true;
-
-  /// Enable sound feedback
-  static const bool enableSoundFeedback = true;
-
-  /// Enable haptic feedback
-  static const bool enableHapticFeedback = true;
-
-  /// Auto-capture when face is detected
-  static const bool autoCapture = true;
-
-  /// Auto-capture delay (seconds)
-  static const int autoCaptureDelaySeconds = 2;
-
-  // ============== Adaptive Thresholds ==============
-
-  /// Get adaptive threshold based on environment
   static double getAdaptiveThreshold({
     required double lightingQuality,
     required double faceQuality,
@@ -129,79 +302,23 @@ class FaceRecognitionConfig {
   }) {
     double threshold = defaultMatchThreshold;
 
-    // Adjust for poor lighting
     if (lightingQuality < 0.5) {
       threshold += 0.1;
     }
 
-    // Adjust for face quality
     if (faceQuality < 0.9) {
       threshold += 0.05;
     }
 
-    // Adjust for outdoor conditions
     if (!isIndoor) {
       threshold += 0.05;
     }
 
-    // Clamp to valid range
-    return threshold.clamp(strictMatchThreshold, lenientMatchThreshold);
-  }
-
-  /// Get confidence score from distance
-  static double getConfidenceScore(double distance) {
-    if (distance <= 0) return 1.0;
-    if (distance >= 1.0) return 0.0;
-
-    // Convert distance to confidence (inverse relationship)
-    // Using exponential decay for smoother confidence curve
-    return (1.0 - distance).clamp(0.0, 1.0);
-  }
-
-  /// Check if match is valid
-  static bool isValidMatch(double distance, {double? customThreshold}) {
-    final threshold = customThreshold ?? defaultMatchThreshold;
-    return distance <= threshold;
-  }
-
-  /// Get match quality rating
-  static MatchQuality getMatchQuality(double distance) {
-    if (distance <= strictMatchThreshold) {
-      return MatchQuality.excellent;
-    } else if (distance <= defaultMatchThreshold) {
-      return MatchQuality.good;
-    } else if (distance <= lenientMatchThreshold) {
-      return MatchQuality.fair;
-    } else {
-      return MatchQuality.poor;
-    }
-  }
-
-  /// Calculate combined confidence from multiple metrics
-  static double getCombinedConfidence({
-    required double euclideanDistance,
-    required double cosineSimilarity,
-    required double faceQuality,
-  }) {
-    // Weight factors for each metric
-    const double euclideanWeight = 0.5;
-    const double cosineWeight = 0.3;
-    const double qualityWeight = 0.2;
-
-    // Convert Euclidean distance to confidence
-    final euclideanConfidence = getConfidenceScore(euclideanDistance);
-
-    // Calculate weighted average
-    final combinedConfidence =
-      (euclideanConfidence * euclideanWeight) +
-      (cosineSimilarity * cosineWeight) +
-      (faceQuality * qualityWeight);
-
-    return combinedConfidence.clamp(0.0, 1.0);
+    return threshold.clamp(0.4, 0.8);
   }
 }
 
-/// Match quality enumeration
+/// Match quality enumeration (for backward compatibility)
 enum MatchQuality {
   excellent,
   good,
@@ -221,19 +338,6 @@ extension MatchQualityExtension on MatchQuality {
         return 'Fair Match';
       case MatchQuality.poor:
         return 'Poor Match';
-    }
-  }
-
-  Color get color {
-    switch (this) {
-      case MatchQuality.excellent:
-        return const Color(0xFF4CAF50); // Green
-      case MatchQuality.good:
-        return const Color(0xFF8BC34A); // Light Green
-      case MatchQuality.fair:
-        return const Color(0xFFFFC107); // Amber
-      case MatchQuality.poor:
-        return const Color(0xFFFF5722); // Deep Orange
     }
   }
 
