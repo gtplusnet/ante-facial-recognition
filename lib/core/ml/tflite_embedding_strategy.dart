@@ -19,7 +19,7 @@ import 'embedding_strategy.dart';
 class TFLiteEmbeddingStrategy implements EmbeddingStrategy {
   static const String modelPath = 'assets/models/mobilefacenet.tflite';
   static const int inputSize = 112;
-  static const int outputSize = 128;
+  static const int outputSize = 192; // Updated for verified model
 
   Interpreter? _interpreter;
   List<int>? _inputShape;
@@ -45,9 +45,21 @@ class TFLiteEmbeddingStrategy implements EmbeddingStrategy {
     try {
       Logger.info('Initializing TFLite embedding strategy...');
 
+      // Try verified model first, then fall back to original
+      String currentModelPath = 'assets/models/mobilefacenet_verified.tflite';
+
+      // Check if verified model exists
+      try {
+        await rootBundle.load(currentModelPath);
+        Logger.info('Using verified MobileFaceNet model');
+      } catch (e) {
+        Logger.warning('Verified model not found, falling back to original');
+        currentModelPath = modelPath;
+      }
+
       // Load model from assets with detailed validation
-      Logger.debug('Loading model from path: $modelPath');
-      final modelData = await rootBundle.load(modelPath);
+      Logger.debug('Loading model from path: $currentModelPath');
+      final modelData = await rootBundle.load(currentModelPath);
 
       // Create a clean copy of the buffer without any offset issues
       final buffer = Uint8List.fromList(
@@ -85,7 +97,7 @@ class TFLiteEmbeddingStrategy implements EmbeddingStrategy {
         // First try loading from asset path directly
         try {
           Logger.debug('Attempting to load from asset path directly...');
-          _interpreter = await Interpreter.fromAsset(modelPath, options: options);
+          _interpreter = await Interpreter.fromAsset(currentModelPath, options: options);
           Logger.debug('Interpreter created successfully from asset path');
         } catch (assetError) {
           Logger.warning('Asset loading failed: $assetError, trying buffer method...');
@@ -98,11 +110,12 @@ class TFLiteEmbeddingStrategy implements EmbeddingStrategy {
 
         // Try without GPU delegate as fallback
         Logger.info('Retrying without GPU delegate...');
-        final cpuOptions = InterpreterOptions();
+        final cpuOptions = InterpreterOptions()
+          ..threads = 2; // Use multiple threads for better performance
 
         try {
           // Try asset path first
-          _interpreter = await Interpreter.fromAsset(modelPath, options: cpuOptions);
+          _interpreter = await Interpreter.fromAsset(currentModelPath, options: cpuOptions);
           Logger.success('Interpreter created successfully with CPU-only mode (asset)');
         } catch (e) {
           // Fall back to buffer
@@ -149,8 +162,9 @@ class TFLiteEmbeddingStrategy implements EmbeddingStrategy {
       // Decode and preprocess image
       final input = _preprocessImage(imageBytes);
 
-      // Create output tensor
-      final output = List.generate(1, (index) => List.filled(outputSize, 0.0));
+      // Create output tensor - dynamically sized based on model
+      final actualOutputSize = _outputShape![1];
+      final output = List.generate(1, (index) => List.filled(actualOutputSize, 0.0));
 
       // Run inference
       _interpreter!.run(input, output);

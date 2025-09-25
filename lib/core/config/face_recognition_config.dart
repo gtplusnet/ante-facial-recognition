@@ -258,7 +258,7 @@ class FaceRecognitionConfig {
   static const int topKMatches = 3;
   static const bool enableLivenessDetection = false;
   static const double livenessThreshold = 0.9;
-  static const int embeddingDimensions = 128;
+  static const int embeddingDimensions = 192; // Updated for verified MobileFaceNet model
   static const bool requireGoodLighting = false;
 
   // Legacy methods for old code compatibility
