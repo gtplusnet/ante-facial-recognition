@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 import 'dart:isolate';
+import 'dart:math' as math;
 
 import 'package:camera/camera.dart';
 import 'package:injectable/injectable.dart';
@@ -274,10 +275,15 @@ class FaceEncodingService {
         return null;
       }
 
+      // Use simplified quality calculation for stored images
+      // This matches the camera flow calculation for consistency
+      final quality = _calculateSimplifiedQuality(face, image.width, image.height);
+      Logger.info('Calculated simplified quality for stored image: ${(quality * 100).toStringAsFixed(1)}%');
+
       return FaceEncodingResult(
         embedding: embedding,
         face: face,
-        quality: FaceProcessingUtils.calculateFaceQuality(face, processedFace),
+        quality: quality,
         processingTime: Duration.zero,
       );
     } catch (e) {
@@ -346,6 +352,44 @@ class FaceEncodingService {
       Logger.error('Failed to extract embedding', error: e);
       return null;
     }
+  }
+
+  /// Calculate simplified quality score for stored images
+  /// This matches the camera flow calculation for consistency
+  double _calculateSimplifiedQuality(FaceDetectionResult face, int imageWidth, int imageHeight) {
+    final imageArea = imageWidth * imageHeight;
+    final faceArea = face.bounds.width * face.bounds.height;
+    final faceRatio = faceArea / imageArea;
+
+    // Size score (ideal: 15-50% of image, more lenient)
+    double sizeScore = 1.0;
+    if (faceRatio < 0.15) {
+      // Gentler penalty for smaller faces
+      sizeScore = math.pow(faceRatio / 0.15, 0.7).toDouble();
+    } else if (faceRatio > 0.5) {
+      // Gentler penalty for larger faces
+      sizeScore = math.pow(0.5 / faceRatio, 0.7).toDouble();
+    }
+
+    // Center score (more forgiving)
+    final centerX = imageWidth / 2;
+    final centerY = imageHeight / 2;
+    final faceCenterX = face.bounds.left + face.bounds.width / 2;
+    final faceCenterY = face.bounds.top + face.bounds.height / 2;
+    final distanceFromCenter = (faceCenterX - centerX).abs() / centerX +
+                               (faceCenterY - centerY).abs() / centerY;
+    final centerScore = (1.0 - distanceFromCenter / 3).clamp(0.0, 1.0); // Reduced penalty
+
+    // Give more weight to size score for better UX
+    final quality = (sizeScore * 0.7 + centerScore * 0.3).clamp(0.0, 1.0);
+
+    // Log quality details for debugging
+    Logger.debug('Stored image face quality - Ratio: ${(faceRatio * 100).toStringAsFixed(1)}%, '
+                 'Size score: ${(sizeScore * 100).toStringAsFixed(0)}%, '
+                 'Center score: ${(centerScore * 100).toStringAsFixed(0)}%, '
+                 'Final: ${(quality * 100).toStringAsFixed(0)}%');
+
+    return quality;
   }
 
   /// Compare two face encodings
