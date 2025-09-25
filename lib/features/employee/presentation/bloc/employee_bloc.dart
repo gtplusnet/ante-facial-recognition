@@ -38,6 +38,9 @@ class EmployeeBloc extends Bloc<EmployeeEvent, EmployeeState> {
     on<GenerateFaceEmbeddings>(_onGenerateFaceEmbeddings);
     on<GenerateAllFaceEmbeddings>(_onGenerateAllFaceEmbeddings);
     on<ClearEmployeeCache>(_onClearEmployeeCache);
+    on<LoadEmployeeDetail>(_onLoadEmployeeDetail);
+    on<AddFaceImage>(_onAddFaceImage);
+    on<DeleteFaceImage>(_onDeleteFaceImage);
   }
 
   Future<void> _onLoadEmployees(
@@ -316,6 +319,107 @@ class EmployeeBloc extends Bloc<EmployeeEvent, EmployeeState> {
     } catch (e) {
       Logger.error('Failed to clear employee cache', error: e);
       emit(EmployeeError(message: 'Failed to clear cache: ${e.toString()}'));
+    }
+  }
+
+  Future<void> _onLoadEmployeeDetail(
+    LoadEmployeeDetail event,
+    Emitter<EmployeeState> emit,
+  ) async {
+    try {
+      emit(const EmployeeLoading());
+
+      // Load employee from local database
+      final employee = await _localDataSource.getEmployeeById(event.employeeId);
+
+      if (employee != null) {
+        emit(EmployeeDetailLoaded(employee: employee));
+      } else {
+        emit(const EmployeeError(message: 'Employee not found'));
+      }
+    } catch (e) {
+      Logger.error('Failed to load employee detail', error: e);
+      emit(EmployeeError(message: 'Failed to load employee: ${e.toString()}'));
+    }
+  }
+
+  Future<void> _onAddFaceImage(
+    AddFaceImage event,
+    Emitter<EmployeeState> emit,
+  ) async {
+    try {
+      emit(const FaceImageProcessing(
+        message: 'Processing face image...',
+        progress: 0.2,
+      ));
+
+      // Get the employee
+      final employee = await _localDataSource.getEmployeeById(event.employeeId);
+      if (employee == null) {
+        emit(const EmployeeError(message: 'Employee not found'));
+        return;
+      }
+
+      emit(const FaceImageProcessing(
+        message: 'Detecting face...',
+        progress: 0.4,
+      ));
+
+      // Generate face encoding from the image
+      final result = await _generateFaceEncodingUseCase.execute(
+        GenerateFaceEncodingParams(
+          employeeId: event.employeeId,
+          imageBytes: event.imageBytes,
+          source: event.source,
+        ),
+      );
+
+      await result.fold(
+        (failure) async {
+          emit(EmployeeError(message: 'Failed to process face image: $failure'));
+        },
+        (encodingId) async {
+          emit(FaceImageAdded(
+            employeeId: event.employeeId,
+            encodingId: encodingId,
+          ));
+
+          // Reload the face recognition service with updated encodings
+          await _faceRecognitionService.loadEmployees();
+
+          // Reload the employee data to show the new face encoding
+          final updatedEmployee = await _localDataSource.getEmployeeById(event.employeeId);
+          if (updatedEmployee != null) {
+            emit(EmployeeDetailLoaded(employee: updatedEmployee));
+          }
+        },
+      );
+    } catch (e) {
+      Logger.error('Failed to add face image', error: e);
+      emit(EmployeeError(message: 'Failed to add face image: ${e.toString()}'));
+    }
+  }
+
+  Future<void> _onDeleteFaceImage(
+    DeleteFaceImage event,
+    Emitter<EmployeeState> emit,
+  ) async {
+    try {
+      emit(const EmployeeLoading());
+
+      // Delete the face encoding from database
+      await _localDataSource.deleteFaceEncoding(event.encodingId);
+
+      emit(FaceImageDeleted(
+        employeeId: event.employeeId,
+        encodingId: event.encodingId,
+      ));
+
+      // Reload the face recognition service with updated encodings
+      await _faceRecognitionService.loadEmployees();
+    } catch (e) {
+      Logger.error('Failed to delete face image', error: e);
+      emit(EmployeeError(message: 'Failed to delete face image: ${e.toString()}'));
     }
   }
 }

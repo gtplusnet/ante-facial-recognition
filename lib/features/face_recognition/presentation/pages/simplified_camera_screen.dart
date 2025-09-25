@@ -567,11 +567,14 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
       }
 
       // Trigger face recognition if quality is good and enough time has passed
-      if (_faceQuality >= 0.8 && _canTriggerRecognition()) {
-        Logger.success('🎯 Quality threshold met: ${(_faceQuality * 100).toInt()}% >= 80%');
+      if (_faceQuality >= 0.7 && _canTriggerRecognition()) {
+        Logger.success('🎯 Quality threshold met: ${(_faceQuality * 100).toInt()}% >= 70%');
         await _triggerFaceRecognition(image);
-      } else if (_faceQuality >= 0.7 && _frameCounter % 30 == 0) {
+      } else if (_faceQuality >= 0.6 && _frameCounter % 30 == 0) {
         Logger.debug('Quality approaching threshold: ${(_faceQuality * 100).toInt()}%');
+      } else if (_isFaceDetected && _frameCounter % 60 == 0) {
+        // Log why recognition isn't triggering
+        Logger.info('Face detected but not triggering - Quality: ${(_faceQuality * 100).toInt()}%, Can trigger: ${_canTriggerRecognition()}');
       }
 
     } catch (e) {
@@ -596,6 +599,8 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
       Logger.info('Face recognition triggered - Quality: ${(_faceQuality * 100).toInt()}%');
       Logger.info('Can trigger recognition: ${_canTriggerRecognition()}');
       Logger.info('Last recognition time: $_lastRecognitionTime');
+      Logger.info('Frame counter: $_frameCounter');
+      Logger.info('Detected faces count: ${_detectedFaces?.length ?? 0}');
       Logger.info('Starting face encoding extraction...');
       Logger.info('Is face not recognized: $_isFaceNotRecognized');
 
@@ -773,35 +778,67 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
   Uint8List _convertYuv420ToNv21(CameraImage cameraImage) {
     final int width = cameraImage.width;
     final int height = cameraImage.height;
-    final int uvRowStride = cameraImage.planes[1].bytesPerRow;
-    final int uvPixelStride = cameraImage.planes[1].bytesPerPixel ?? 1;
 
-    // NV21 format: Y plane followed by interleaved VU plane
-    // Total size = width * height * 3 / 2
-    final nv21 = Uint8List((width * height * 3) ~/ 2);
+    // Calculate the correct NV21 buffer size
+    // Y plane: width * height
+    // UV plane (interleaved): (width * height) / 2
+    final int ySize = width * height;
+    final int uvSize = (width * height) ~/ 2;
 
-    // Copy Y plane directly (assuming it's already properly formatted)
-    final yPlane = cameraImage.planes[0].bytes;
-    final ySize = width * height;
+    final nv21 = Uint8List(ySize + uvSize);
 
-    // Copy Y data
-    for (int i = 0; i < ySize && i < yPlane.length; i++) {
-      nv21[i] = yPlane[i];
+    // Copy Y plane directly
+    final yPlane = cameraImage.planes[0];
+    final yBytes = yPlane.bytes;
+
+    // Handle Y plane based on stride
+    if (yPlane.bytesPerRow == width) {
+      // Direct copy if no padding
+      nv21.setRange(0, ySize, yBytes);
+    } else {
+      // Copy row by row if there's padding
+      int nv21Offset = 0;
+      for (int row = 0; row < height; row++) {
+        final start = row * yPlane.bytesPerRow;
+        final end = start + width;
+        if (start < yBytes.length && end <= yBytes.length) {
+          nv21.setRange(nv21Offset, nv21Offset + width, yBytes, start);
+        }
+        nv21Offset += width;
+      }
     }
 
-    // Interleave U and V planes (note: NV21 format is V then U, not U then V)
-    final uPlane = cameraImage.planes[1].bytes;
-    final vPlane = cameraImage.planes[2].bytes;
+    // Handle U and V planes
+    final uPlane = cameraImage.planes[1];
+    final vPlane = cameraImage.planes[2];
+    final uBytes = uPlane.bytes;
+    final vBytes = vPlane.bytes;
 
-    int nv21Index = width * height;
-    for (int i = 0; i < height ~/ 2; i++) {
-      for (int j = 0; j < width ~/ 2; j++) {
-        final int uvIndex = i * uvRowStride + j * uvPixelStride;
+    final int uvRowStride = uPlane.bytesPerRow;
+    final int uvPixelStride = uPlane.bytesPerPixel ?? 2;
 
-        // Make sure we don't go out of bounds
-        if (uvIndex < vPlane.length && uvIndex < uPlane.length && nv21Index + 1 < nv21.length) {
-          nv21[nv21Index++] = vPlane[uvIndex];  // V first
-          nv21[nv21Index++] = uPlane[uvIndex];  // U second
+    // Start writing UV data after Y data
+    int nv21Offset = ySize;
+
+    // Interleave U and V for NV21 format (V first, then U)
+    if (uvPixelStride == 2) {
+      // UV planes are already interleaved (common on many devices)
+      // Just need to ensure V comes before U
+      for (int i = 0; i < uvSize ~/ 2; i++) {
+        if (i * 2 < vBytes.length && i * 2 < uBytes.length) {
+          nv21[nv21Offset++] = vBytes[i * 2];
+          nv21[nv21Offset++] = uBytes[i * 2];
+        }
+      }
+    } else {
+      // UV planes are separate, need to interleave manually
+      for (int row = 0; row < height ~/ 2; row++) {
+        for (int col = 0; col < width ~/ 2; col++) {
+          final int uvIndex = row * uvRowStride + col * uvPixelStride;
+          if (uvIndex < vBytes.length && uvIndex < uBytes.length && nv21Offset + 1 < nv21.length) {
+            nv21[nv21Offset++] = vBytes[uvIndex];
+            nv21[nv21Offset++] = uBytes[uvIndex];
+          }
         }
       }
     }
@@ -882,15 +919,13 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
       }
 
       // Create InputImage with converted bytes
-      // Calculate bytesPerRow based on the actual plane data
-      // For YUV420 formats, use the Y plane's bytesPerRow
-      final bytesPerRow = cameraImage.planes.isNotEmpty
-          ? cameraImage.planes[0].bytesPerRow
-          : cameraImage.width;
+      // IMPORTANT: For NV21 format after conversion, bytesPerRow should be width
+      // The converted NV21 buffer doesn't have padding, unlike the original planes
+      final bytesPerRow = cameraImage.width; // Use width for NV21, not plane's bytesPerRow
 
       // Log buffer sizes for debugging
       Logger.info('Buffer size: ${imageBytes.length}, Expected: ${(cameraImage.width * cameraImage.height * 3) ~/ 2}');
-      Logger.info('Using bytesPerRow: $bytesPerRow from plane (width: ${cameraImage.width})');
+      Logger.info('Using bytesPerRow: $bytesPerRow (width) for NV21 format');
 
       return InputImage.fromBytes(
         bytes: imageBytes,

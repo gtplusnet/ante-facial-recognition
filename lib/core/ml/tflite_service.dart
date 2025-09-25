@@ -12,14 +12,13 @@ import '../config/face_quality_config.dart';
 import '../error/error_handler.dart';
 import '../utils/logger.dart';
 import 'embedding_strategy.dart';
-import 'mock_embedding_strategy.dart';
 import 'tflite_embedding_strategy.dart';
 
 @singleton
 class TFLiteService {
   static const String modelPath = 'assets/models/mobilefacenet.tflite';
   static const int inputSize = 112;
-  static const int outputSize = 128;
+  static const int outputSize = 192; // Updated to match verified MobileFaceNet model
   static const int numThreads = 4;
 
   // Strategy pattern implementation
@@ -45,40 +44,50 @@ class TFLiteService {
       return;
     }
 
-    await ErrorHandler.handleAsyncOperation(
-      'initialize TFLite service',
-      () async {
-        Logger.info('Initializing TFLite service...');
+    Logger.info('=== TFLITE SERVICE INITIALIZATION START ===');
+    Logger.info('Initializing TFLite service...');
 
-        // Try to initialize TFLite strategy first
-        bool tfliteSuccess = false;
-        await ErrorHandler.handleOptionalOperationWithWarning(
-          'initialize TFLite strategy',
-          () async {
-            _embeddingStrategy = TFLiteEmbeddingStrategy();
-            await _embeddingStrategy.initialize();
-            tfliteSuccess = true;
-            Logger.success('Using TFLite embedding strategy');
-          },
-          warningMessage: 'TFLite strategy failed, falling back to mock',
+    try {
+      // Initialize TFLite strategy - NO FALLBACK TO MOCK
+      _embeddingStrategy = TFLiteEmbeddingStrategy();
+      Logger.info('Created TFLite embedding strategy instance');
+
+      try {
+        await _embeddingStrategy.initialize();
+        Logger.success('✓ TFLite model loaded successfully');
+        Logger.info('Strategy name: ${_embeddingStrategy.strategyName}');
+        Logger.info('Model is ready for face recognition');
+      } catch (e) {
+        // Log detailed error information
+        Logger.error('❌ CRITICAL: TFLite model failed to load', error: e);
+        Logger.error('Expected model paths:');
+        Logger.error('  1. assets/models/mobilefacenet_verified.tflite (preferred)');
+        Logger.error('  2. assets/models/mobilefacenet.tflite (fallback)');
+        Logger.error('');
+        Logger.error('This is a CRITICAL ERROR - face recognition WILL NOT WORK!');
+        Logger.error('Please ensure the TFLite model file exists in the assets folder.');
+
+        // Throw exception with detailed message - DO NOT FALLBACK
+        throw Exception(
+          'CRITICAL: Failed to load TFLite model for face recognition.\n'
+          'The app cannot function without the ML model.\n'
+          'Please check that the model file exists at: assets/models/mobilefacenet_verified.tflite\n'
+          'Error details: $e'
         );
+      }
 
-        // If TFLite strategy failed, use mock strategy
-        if (!tfliteSuccess) {
-          _embeddingStrategy = MockEmbeddingStrategy();
-          await _embeddingStrategy.initialize();
-          Logger.info('Using mock embedding strategy for testing');
-        }
+      // Initialize legacy components for backward compatibility
+      await _initializeLegacyComponents();
 
-        // Initialize legacy components for backward compatibility
-        await _initializeLegacyComponents();
-
-        _isInitialized = true;
-        Logger.success('TFLite service initialized with ${_embeddingStrategy.strategyName}');
-      },
-      shouldRethrow: true,
-      customErrorMessage: 'Failed to initialize face recognition model',
-    );
+      _isInitialized = true;
+      Logger.success('=== TFLITE SERVICE INITIALIZATION SUCCESS ===');
+      Logger.success('TFLite service fully initialized with ${_embeddingStrategy.strategyName}');
+    } catch (e) {
+      Logger.error('=== TFLITE SERVICE INITIALIZATION FAILED ===', error: e);
+      _isInitialized = false;
+      // Re-throw to propagate to initialization service
+      throw e;
+    }
   }
 
   /// Initialize legacy components for backward compatibility
@@ -155,23 +164,16 @@ class TFLiteService {
   /// Extract face embedding from image bytes
   Future<Float32List> extractEmbedding(Uint8List imageBytes) async {
     if (!_isInitialized) {
-      throw Exception('TFLite service not initialized');
+      throw Exception('TFLite service not initialized - cannot extract embeddings');
     }
 
     try {
-      // Use strategy pattern for embedding extraction
+      // Use strategy pattern for embedding extraction - NO MOCK FALLBACK
       return await _embeddingStrategy.extractEmbedding(imageBytes);
     } catch (e) {
-      Logger.error('Failed to extract embedding with strategy', error: e);
-
-      // Fallback to legacy method for backward compatibility
-      try {
-        return await _extractEmbeddingLegacy(imageBytes);
-      } catch (legacyError) {
-        Logger.error('Legacy fallback also failed', error: legacyError);
-        // Final fallback to mock embedding
-        return _generateMockEmbedding(imageBytes);
-      }
+      Logger.error('Failed to extract embedding', error: e);
+      // No fallback - throw the error
+      throw Exception('Failed to extract face embedding: $e');
     }
   }
 
@@ -336,7 +338,7 @@ class TFLiteService {
   /// Calculate Euclidean distance between two embeddings
   double calculateDistance(Float32List embedding1, Float32List embedding2) {
     if (embedding1.length != embedding2.length) {
-      throw Exception('Embedding dimensions do not match');
+      throw Exception('Embedding dimensions do not match: ${embedding1.length} vs ${embedding2.length}');
     }
 
     double sum = 0.0;
@@ -351,7 +353,7 @@ class TFLiteService {
   /// Calculate cosine similarity between two embeddings
   double calculateCosineSimilarity(Float32List embedding1, Float32List embedding2) {
     if (embedding1.length != embedding2.length) {
-      throw Exception('Embedding dimensions do not match');
+      throw Exception('Embedding dimensions do not match: ${embedding1.length} vs ${embedding2.length}');
     }
 
     double dotProduct = 0.0;

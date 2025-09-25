@@ -2,6 +2,8 @@ import 'dart:typed_data';
 
 import 'package:equatable/equatable.dart';
 
+import 'face_image.dart';
+
 class Employee extends Equatable {
   final String id;
   final String name;
@@ -13,6 +15,7 @@ class Employee extends Equatable {
   final String? photoUrl;
   final Uint8List? photoBytes;
   final List<FaceEncoding> faceEncodings;
+  final List<FaceImage> faceImages; // Actual face photos captured
   final DateTime? lastSyncedAt;
   final DateTime? createdAt;
   final DateTime? updatedAt;
@@ -30,6 +33,7 @@ class Employee extends Equatable {
     this.photoUrl,
     this.photoBytes,
     this.faceEncodings = const [],
+    this.faceImages = const [],
     this.lastSyncedAt,
     this.createdAt,
     this.updatedAt,
@@ -51,6 +55,7 @@ class Employee extends Equatable {
     String? photoUrl,
     Uint8List? photoBytes,
     List<FaceEncoding>? faceEncodings,
+    List<FaceImage>? faceImages,
     DateTime? lastSyncedAt,
     DateTime? createdAt,
     DateTime? updatedAt,
@@ -68,6 +73,7 @@ class Employee extends Equatable {
       photoUrl: photoUrl ?? this.photoUrl,
       photoBytes: photoBytes ?? this.photoBytes,
       faceEncodings: faceEncodings ?? this.faceEncodings,
+      faceImages: faceImages ?? this.faceImages,
       lastSyncedAt: lastSyncedAt ?? this.lastSyncedAt,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
@@ -87,6 +93,7 @@ class Employee extends Equatable {
         employeeCode,
         photoUrl,
         faceEncodings,
+        faceImages,
         lastSyncedAt,
         createdAt,
         updatedAt,
@@ -101,6 +108,7 @@ class FaceEncoding extends Equatable {
   final double quality;
   final DateTime createdAt;
   final String? source; // 'photo', 'registration', 'update'
+  final Uint8List? imageBytes; // Actual image data for this encoding
   final Map<String, dynamic>? metadata;
 
   const FaceEncoding({
@@ -109,6 +117,7 @@ class FaceEncoding extends Equatable {
     required this.quality,
     required this.createdAt,
     this.source,
+    this.imageBytes,
     this.metadata,
   });
 
@@ -119,6 +128,7 @@ class FaceEncoding extends Equatable {
         quality,
         createdAt,
         source,
+        imageBytes,
         metadata,
       ];
 }

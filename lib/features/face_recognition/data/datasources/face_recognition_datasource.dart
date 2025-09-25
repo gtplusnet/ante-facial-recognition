@@ -35,7 +35,7 @@ class FaceRecognitionDatasource {
   /// Verify if encoding is valid
   bool isValidEncoding(List<double> encoding) {
     if (encoding.isEmpty) return false;
-    if (encoding.length != 128) return false; // MobileFaceNet output size
+    if (encoding.length != 192) return false; // Verified MobileFaceNet model output size
 
     // Check for NaN or infinite values
     for (final value in encoding) {

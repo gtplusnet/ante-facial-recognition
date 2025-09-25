@@ -10,7 +10,7 @@ class FaceRecognitionConstants {
 
   // Model dimensions
   static const int faceSize = 112; // MobileFaceNet input size (112x112)
-  static const int embeddingSize = 128; // Output embedding dimensions
+  static const int embeddingSize = 192; // Output embedding dimensions - verified MobileFaceNet model
 
   // Performance thresholds
   static const double highConfidenceThreshold = 0.85;

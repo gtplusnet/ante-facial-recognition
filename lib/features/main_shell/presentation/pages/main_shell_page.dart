@@ -25,8 +25,8 @@ class _MainShellPageState extends State<MainShellPage> {
 
   void _onDestinationSelected(int index) {
     // Notify about navigation change
-    if (_previousIndex == 0 && index != 0) {
-      // Navigating away from Recognition tab (index 0)
+    if (_previousIndex == 1 && index != 1) {
+      // Navigating away from Recognition tab (now index 1)
       // This will be handled by the visibility detector in SimplifiedCameraScreen
     }
     _previousIndex = index;
@@ -45,21 +45,25 @@ class _MainShellPageState extends State<MainShellPage> {
         selectedIndex: widget.navigationShell.currentIndex,
         onDestinationSelected: _onDestinationSelected,
         destinations: [
-          NavigationDestination(
-            icon: Icon(Icons.face_outlined, size: 24.w),
-            selectedIcon: Icon(Icons.face, size: 24.w),
-            label: 'Recognition',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.people_outline, size: 24.w),
-            selectedIcon: Icon(Icons.people, size: 24.w),
-            label: 'Employees',
-          ),
+          // Logs is now first (index 0) - default page
           NavigationDestination(
             icon: Icon(Icons.history_outlined, size: 24.w),
             selectedIcon: Icon(Icons.history, size: 24.w),
             label: 'Logs',
           ),
+          // Recognition is now second (index 1)
+          NavigationDestination(
+            icon: Icon(Icons.face_outlined, size: 24.w),
+            selectedIcon: Icon(Icons.face, size: 24.w),
+            label: 'Recognition',
+          ),
+          // Employees is now third (index 2)
+          NavigationDestination(
+            icon: Icon(Icons.people_outline, size: 24.w),
+            selectedIcon: Icon(Icons.people, size: 24.w),
+            label: 'Employees',
+          ),
+          // Settings remains fourth (index 3)
           NavigationDestination(
             icon: Icon(Icons.settings_outlined, size: 24.w),
             selectedIcon: Icon(Icons.settings, size: 24.w),

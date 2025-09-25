@@ -21,7 +21,8 @@ class FaceRecognitionConfig {
 
   /// Maximum Euclidean distance for face matching
   /// Lower values require closer matches
-  double faceMatchDistance = 0.6;
+  /// Updated to 1.0 based on MobileFaceNet typical thresholds
+  double faceMatchDistance = 1.0;
 
   // ========== Processing Parameters ==========
   /// Maximum time allowed for face processing (milliseconds)
@@ -213,7 +214,7 @@ class FaceRecognitionConfig {
   void resetToDefaults() {
     confidenceThreshold = 0.7;
     qualityThreshold = 0.8;
-    faceMatchDistance = 0.6;
+    faceMatchDistance = 1.0;  // Updated to reasonable threshold for MobileFaceNet
     maxProcessingTimeMs = 1000;
     frameSkipCount = 5;
     processingIntervalMs = 800;
@@ -254,7 +255,7 @@ class FaceRecognitionConfig {
 
   // ========== Legacy Properties (for backward compatibility) ==========
   // These are used by old code that hasn't been migrated yet
-  static const double defaultMatchThreshold = 0.6;
+  static const double defaultMatchThreshold = 1.0;  // Updated to match new threshold
   static const int topKMatches = 3;
   static const bool enableLivenessDetection = false;
   static const double livenessThreshold = 0.9;

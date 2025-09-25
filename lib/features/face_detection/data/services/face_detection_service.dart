@@ -1,4 +1,3 @@
-import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -46,16 +45,14 @@ class FaceDetectionService {
 
       final results = faces.map((face) => _convertToFaceDetectionResult(face)).toList();
 
-      // If no faces detected, try mock detection for testing
       if (results.isEmpty) {
-        Logger.info('ML Kit detected no faces, attempting mock detection');
-        return _generateMockFaceDetection(inputImage);
+        Logger.warning('No faces detected in image');
       }
 
       return results;
     } catch (e) {
-      Logger.error('Face detection failed, falling back to mock detection', error: e);
-      return _generateMockFaceDetection(inputImage);
+      Logger.error('Face detection failed - NO FALLBACK', error: e);
+      throw Exception('Face detection failed: $e');
     }
   }
 
@@ -66,14 +63,14 @@ class FaceDetectionService {
     try {
       final inputImage = _convertCameraImage(image, cameraDescription);
       if (inputImage == null) {
-        Logger.warning('Failed to convert camera image, using mock detection');
-        return _generateMockFaceDetectionFromCamera(image);
+        Logger.error('Failed to convert camera image for ML Kit');
+        throw Exception('Camera image conversion failed');
       }
 
       return detectFacesFromImage(inputImage);
     } catch (e) {
-      Logger.error('Face detection from camera failed, using mock detection', error: e);
-      return _generateMockFaceDetectionFromCamera(image);
+      Logger.error('Face detection from camera failed - NO FALLBACK', error: e);
+      throw Exception('Camera face detection failed: $e');
     }
   }
 
@@ -102,6 +99,109 @@ class FaceDetectionService {
     }
   }
 
+  /// Detect faces from a decoded image file (JPEG/PNG)
+  Future<List<domain.FaceDetectionResult>> detectFacesFromImageFile(
+    Uint8List fileBytes,
+  ) async {
+    try {
+      Logger.info('Detecting faces from image file...');
+      Logger.info('File size: ${fileBytes.length} bytes');
+
+      // Directly use the alternative method which properly decodes the image
+      return _detectFacesFromDecodedImage(fileBytes);
+    } catch (e) {
+      Logger.error('Failed to detect faces from image file', error: e);
+      return [];
+    }
+  }
+
+  /// Alternative method: Decode image and convert to NV21 for ML Kit
+  Future<List<domain.FaceDetectionResult>> _detectFacesFromDecodedImage(
+    Uint8List fileBytes,
+  ) async {
+    try {
+      Logger.info('Using alternative face detection method...');
+
+      // Import image package for decoding
+      // Note: This requires adding 'import 'package:image/image.dart' as img;' at the top
+      final codec = await ui.instantiateImageCodec(fileBytes);
+      final frame = await codec.getNextFrame();
+      final image = frame.image;
+
+      // Get image dimensions
+      final width = image.width;
+      final height = image.height;
+
+      Logger.info('Decoded image: ${width}x${height}');
+
+      // Convert to byte data
+      final byteData = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+      if (byteData == null) {
+        Logger.error('Failed to convert image to byte data');
+        return [];
+      }
+
+      final rgbaBytes = byteData.buffer.asUint8List();
+
+      // Convert RGBA to NV21 for ML Kit
+      final nv21Bytes = _convertRgbaToNv21(rgbaBytes, width, height);
+
+      // Create InputImage with NV21 format
+      final inputImage = mlkit.InputImage.fromBytes(
+        bytes: nv21Bytes,
+        metadata: mlkit.InputImageMetadata(
+          size: ui.Size(width.toDouble(), height.toDouble()),
+          rotation: mlkit.InputImageRotation.rotation0deg,
+          format: mlkit.InputImageFormat.nv21,
+          bytesPerRow: width, // NV21 has no padding
+        ),
+      );
+
+      return detectFacesFromImage(inputImage);
+    } catch (e) {
+      Logger.error('Alternative face detection also failed', error: e);
+      return [];
+    }
+  }
+
+  /// Convert RGBA bytes to NV21 format for ML Kit
+  Uint8List _convertRgbaToNv21(Uint8List rgba, int width, int height) {
+    // NV21 size = width * height * 1.5
+    final ySize = width * height;
+    final uvSize = (width * height) ~/ 2;
+    final nv21 = Uint8List(ySize + uvSize);
+
+    // Convert RGBA to YUV and then to NV21
+    int nv21Index = 0;
+    int uvIndex = ySize;
+
+    for (int y = 0; y < height; y++) {
+      for (int x = 0; x < width; x++) {
+        final rgbaIndex = (y * width + x) * 4;
+        final r = rgba[rgbaIndex];
+        final g = rgba[rgbaIndex + 1];
+        final b = rgba[rgbaIndex + 2];
+
+        // Convert RGB to Y (luminance)
+        final yValue = ((66 * r + 129 * g + 25 * b + 128) >> 8) + 16;
+        nv21[nv21Index++] = yValue.clamp(0, 255);
+
+        // Sample UV values at every 2x2 block
+        if (y % 2 == 0 && x % 2 == 0 && uvIndex < nv21.length - 1) {
+          // Convert RGB to UV
+          final u = ((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128;
+          final v = ((112 * r - 94 * g - 18 * b + 128) >> 8) + 128;
+
+          // NV21 format: V comes first, then U
+          nv21[uvIndex++] = v.clamp(0, 255);
+          nv21[uvIndex++] = u.clamp(0, 255);
+        }
+      }
+    }
+
+    return nv21;
+  }
+
   mlkit.InputImage? _convertCameraImage(
     camera.CameraImage image,
     camera.CameraDescription cameraDescription,
@@ -120,13 +220,15 @@ class FaceDetectionService {
       // Convert YUV420 to NV21 for ML Kit
       final bytes = _convertYuv420ToNv21(image);
 
+      // Important: For NV21 format, bytesPerRow should match image width for ML Kit
+      // The Y plane's bytesPerRow might include padding, but NV21 buffer doesn't
       return mlkit.InputImage.fromBytes(
         bytes: bytes,
         metadata: mlkit.InputImageMetadata(
           size: ui.Size(image.width.toDouble(), image.height.toDouble()),
           rotation: rotation,
           format: format,
-          bytesPerRow: image.planes[0].bytesPerRow,
+          bytesPerRow: image.width, // Use width for NV21, not plane's bytesPerRow
         ),
       );
     } catch (e) {
@@ -138,25 +240,63 @@ class FaceDetectionService {
   Uint8List _convertYuv420ToNv21(camera.CameraImage image) {
     final int width = image.width;
     final int height = image.height;
-    final int uvRowStride = image.planes[1].bytesPerRow;
-    final int uvPixelStride = image.planes[1].bytesPerPixel ?? 1;
 
-    final nv21 = Uint8List(width * height + 2 * (width ~/ 2) * (height ~/ 2));
+    // Calculate the correct NV21 buffer size
+    // Y plane: width * height
+    // UV plane (interleaved): (width * height) / 2
+    final int ySize = width * height;
+    final int uvSize = (width * height) ~/ 2;
 
-    // Copy Y plane
-    final yPlane = image.planes[0].bytes;
-    nv21.setRange(0, yPlane.length, yPlane);
+    final nv21 = Uint8List(ySize + uvSize);
 
-    // Interleave U and V planes
-    final uPlane = image.planes[1].bytes;
-    final vPlane = image.planes[2].bytes;
+    // Copy Y plane directly
+    final yPlane = image.planes[0];
+    final yBytes = yPlane.bytes;
 
-    int nv21Index = width * height;
-    for (int i = 0; i < height ~/ 2; i++) {
-      for (int j = 0; j < width ~/ 2; j++) {
-        final int uvIndex = i * uvRowStride + j * uvPixelStride;
-        nv21[nv21Index++] = vPlane[uvIndex];
-        nv21[nv21Index++] = uPlane[uvIndex];
+    // Handle Y plane based on stride
+    if (yPlane.bytesPerRow == width) {
+      // Direct copy if no padding
+      nv21.setRange(0, ySize, yBytes);
+    } else {
+      // Copy row by row if there's padding
+      int nv21Offset = 0;
+      for (int row = 0; row < height; row++) {
+        final start = row * yPlane.bytesPerRow;
+        nv21.setRange(nv21Offset, nv21Offset + width, yBytes, start);
+        nv21Offset += width;
+      }
+    }
+
+    // Handle U and V planes
+    final uPlane = image.planes[1];
+    final vPlane = image.planes[2];
+    final uBytes = uPlane.bytes;
+    final vBytes = vPlane.bytes;
+
+    final int uvRowStride = uPlane.bytesPerRow;
+    final int uvPixelStride = uPlane.bytesPerPixel ?? 2;
+
+    // Start writing UV data after Y data
+    int nv21Offset = ySize;
+
+    // Interleave U and V for NV21 format (V first, then U)
+    if (uvPixelStride == 2) {
+      // UV planes are already interleaved (common on many devices)
+      // Just need to ensure V comes before U
+      for (int i = 0; i < uvSize ~/ 2; i++) {
+        nv21[nv21Offset++] = vBytes[i * 2];
+        nv21[nv21Offset++] = uBytes[i * 2];
+      }
+    } else {
+      // UV planes are separate, need to interleave manually
+      for (int row = 0; row < height ~/ 2; row++) {
+        for (int col = 0; col < width ~/ 2; col++) {
+          final int uvIndex = row * uvRowStride + col * uvPixelStride;
+          if (uvIndex < vBytes.length && uvIndex < uBytes.length) {
+            nv21[nv21Offset++] = vBytes[uvIndex];
+            nv21[nv21Offset++] = uBytes[uvIndex];
+          }
+        }
       }
     }
 
@@ -305,181 +445,7 @@ class FaceDetectionService {
     }
   }
 
-  /// Generate mock face detection results for testing and fallback scenarios
-  List<domain.FaceDetectionResult> _generateMockFaceDetection(mlkit.InputImage inputImage) {
-    Logger.info('Generating mock face detection results');
-
-    // Create a mock face detection result with realistic bounds
-    final imageWidth = inputImage.metadata?.size.width ?? 640.0;
-    final imageHeight = inputImage.metadata?.size.height ?? 480.0;
-
-    // Calculate face bounds (centered in image with realistic proportions)
-    final faceWidth = imageWidth * 0.4; // Face takes 40% of image width
-    final faceHeight = imageHeight * 0.5; // Face takes 50% of image height
-    final faceLeft = (imageWidth - faceWidth) / 2;
-    final faceTop = (imageHeight - faceHeight) / 2.5; // Slightly above center
-
-    final faceBounds = ui.Rect.fromLTWH(faceLeft, faceTop, faceWidth, faceHeight);
-
-    return [
-      domain.FaceDetectionResult(
-        bounds: domain.FaceBounds.fromRect(faceBounds),
-        landmarks: _generateMockLandmarks(faceBounds),
-        contours: _generateMockContours(faceBounds),
-        rotationY: 0.0, // Face looking straight
-        rotationZ: 0.0, // Face upright
-        leftEyeOpenProbability: 0.95, // Eyes open
-        rightEyeOpenProbability: 0.95,
-        smilingProbability: 0.7, // Slight smile
-        trackingId: 1,
-        timestamp: DateTime.now(),
-      ),
-    ];
-  }
-
-  /// Generate mock face detection for camera images
-  List<domain.FaceDetectionResult> _generateMockFaceDetectionFromCamera(camera.CameraImage image) {
-    Logger.info('=== MOCK FACE DETECTION START ===');
-    Logger.info('Generating mock face detection for camera image');
-    Logger.info('Camera image dimensions: ${image.width}x${image.height}');
-
-    final imageWidth = image.width.toDouble();
-    final imageHeight = image.height.toDouble();
-
-    // Simulate different face positions based on time for demo purposes
-    final time = DateTime.now().millisecondsSinceEpoch;
-    final cycle = (time ~/ 3000) % 4; // 3-second cycles with 4 positions
-    Logger.info('Time cycle: $cycle (${time ~/ 3000})');
-
-    double faceLeft, faceTop;
-    String position;
-    String employeeName;
-
-    switch (cycle) {
-      case 0: // Center - Enzo Reyes
-        faceLeft = imageWidth * 0.3;
-        faceTop = imageHeight * 0.25;
-        position = 'center';
-        employeeName = 'Enzo Reyes';
-        break;
-      case 1: // Slightly left - Rona Fajardo
-        faceLeft = imageWidth * 0.2;
-        faceTop = imageHeight * 0.3;
-        position = 'left';
-        employeeName = 'Rona Fajardo';
-        break;
-      case 2: // Slightly right - guillermo0 tabligan
-        faceLeft = imageWidth * 0.4;
-        faceTop = imageHeight * 0.2;
-        position = 'right';
-        employeeName = 'guillermo0 tabligan';
-        break;
-      default: // No face detected
-        Logger.info('Mock cycle: no face detected (cycle $cycle)');
-        Logger.info('=== MOCK FACE DETECTION END (NO FACE) ===');
-        return [];
-    }
-
-    final faceWidth = imageWidth * 0.4;
-    final faceHeight = imageHeight * 0.5;
-    final faceBounds = ui.Rect.fromLTWH(faceLeft, faceTop, faceWidth, faceHeight);
-
-    Logger.success('Mock face detected for: $employeeName');
-    Logger.info('Face position: $position');
-    Logger.info('Face bounds: left=${faceLeft.toStringAsFixed(1)}, top=${faceTop.toStringAsFixed(1)}, width=${faceWidth.toStringAsFixed(1)}, height=${faceHeight.toStringAsFixed(1)}');
-    Logger.info('Face center: ${faceBounds.center}');
-    Logger.info('Face quality indicators: eyes_open=0.95, smile=${(0.6 + (cycle * 0.1)).toStringAsFixed(2)}');
-
-    final result = domain.FaceDetectionResult(
-      bounds: domain.FaceBounds.fromRect(faceBounds),
-      landmarks: _generateMockLandmarks(faceBounds),
-      contours: _generateMockContours(faceBounds),
-      rotationY: (cycle - 1) * 10.0, // Slight head turn
-      rotationZ: 0.0,
-      leftEyeOpenProbability: 0.95,
-      rightEyeOpenProbability: 0.95,
-      smilingProbability: 0.6 + (cycle * 0.1), // Vary smile
-      trackingId: 1,
-      timestamp: DateTime.now(),
-    );
-
-    Logger.success('Mock face detection result created for $employeeName');
-    Logger.info('=== MOCK FACE DETECTION END ===');
-
-    return [result];
-  }
-
-  /// Generate mock face landmarks
-  Map<domain.FaceLandmarkType, domain.FaceLandmark> _generateMockLandmarks(ui.Rect faceBounds) {
-    final centerX = faceBounds.center.dx;
-    final centerY = faceBounds.center.dy;
-    final width = faceBounds.width;
-    final height = faceBounds.height;
-
-    return {
-      domain.FaceLandmarkType.leftEye: domain.FaceLandmark(
-        type: domain.FaceLandmarkType.leftEye,
-        x: centerX - width * 0.15,
-        y: centerY - height * 0.1,
-      ),
-      domain.FaceLandmarkType.rightEye: domain.FaceLandmark(
-        type: domain.FaceLandmarkType.rightEye,
-        x: centerX + width * 0.15,
-        y: centerY - height * 0.1,
-      ),
-      domain.FaceLandmarkType.noseBase: domain.FaceLandmark(
-        type: domain.FaceLandmarkType.noseBase,
-        x: centerX,
-        y: centerY + height * 0.05,
-      ),
-      domain.FaceLandmarkType.mouthLeft: domain.FaceLandmark(
-        type: domain.FaceLandmarkType.mouthLeft,
-        x: centerX - width * 0.1,
-        y: centerY + height * 0.2,
-      ),
-      domain.FaceLandmarkType.mouthRight: domain.FaceLandmark(
-        type: domain.FaceLandmarkType.mouthRight,
-        x: centerX + width * 0.1,
-        y: centerY + height * 0.2,
-      ),
-      domain.FaceLandmarkType.mouthBottom: domain.FaceLandmark(
-        type: domain.FaceLandmarkType.mouthBottom,
-        x: centerX,
-        y: centerY + height * 0.25,
-      ),
-      domain.FaceLandmarkType.leftCheek: domain.FaceLandmark(
-        type: domain.FaceLandmarkType.leftCheek,
-        x: centerX - width * 0.2,
-        y: centerY + height * 0.1,
-      ),
-      domain.FaceLandmarkType.rightCheek: domain.FaceLandmark(
-        type: domain.FaceLandmarkType.rightCheek,
-        x: centerX + width * 0.2,
-        y: centerY + height * 0.1,
-      ),
-    };
-  }
-
-  /// Generate mock face contours
-  Map<domain.FaceContourType, List<domain.FacePoint>> _generateMockContours(ui.Rect faceBounds) {
-    final centerX = faceBounds.center.dx;
-    final centerY = faceBounds.center.dy;
-    final width = faceBounds.width;
-    final height = faceBounds.height;
-
-    // Generate simple contours for face outline
-    final faceContour = <domain.FacePoint>[];
-    for (int i = 0; i <= 20; i++) {
-      final angle = (i * math.pi * 2) / 20;
-      final x = centerX + (width * 0.45) * math.cos(angle);
-      final y = centerY + (height * 0.45) * math.sin(angle);
-      faceContour.add(domain.FacePoint(x: x, y: y));
-    }
-
-    return {
-      domain.FaceContourType.face: faceContour,
-    };
-  }
+  // Mock detection methods removed - no fallback allowed
 
   Future<void> dispose() async {
     try {

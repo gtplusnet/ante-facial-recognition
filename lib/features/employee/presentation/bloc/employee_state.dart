@@ -133,3 +133,53 @@ class EmployeeEmbeddingGenerated extends EmployeeState {
   @override
   List<Object?> get props => [employeeId, message];
 }
+
+class EmployeeDetailLoaded extends EmployeeState {
+  final Employee employee;
+
+  const EmployeeDetailLoaded({
+    required this.employee,
+  });
+
+  @override
+  List<Object?> get props => [employee];
+}
+
+class FaceImageAdded extends EmployeeState {
+  final String employeeId;
+  final String encodingId;
+
+  const FaceImageAdded({
+    required this.employeeId,
+    required this.encodingId,
+  });
+
+  @override
+  List<Object?> get props => [employeeId, encodingId];
+}
+
+class FaceImageDeleted extends EmployeeState {
+  final String employeeId;
+  final String encodingId;
+
+  const FaceImageDeleted({
+    required this.employeeId,
+    required this.encodingId,
+  });
+
+  @override
+  List<Object?> get props => [employeeId, encodingId];
+}
+
+class FaceImageProcessing extends EmployeeState {
+  final String message;
+  final double progress;
+
+  const FaceImageProcessing({
+    required this.message,
+    this.progress = 0.0,
+  });
+
+  @override
+  List<Object?> get props => [message, progress];
+}

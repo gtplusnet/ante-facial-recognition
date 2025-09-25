@@ -238,19 +238,25 @@ class FaceEncodingService {
     Uint8List imageBytes,
   ) async {
     try {
-      // Decode image
+      Logger.info('Extracting face encoding from image bytes...');
+      Logger.info('Image bytes size: ${imageBytes.length}');
+
+      // Decode image to get dimensions and process
       final image = img.decodeImage(imageBytes);
       if (image == null) {
         Logger.error('Failed to decode image bytes');
         return null;
       }
 
-      // Detect faces using ML Kit
-      final faces = await _faceDetectionService.detectFacesFromBytes(
-        imageBytes,
-        width: image.width,
-        height: image.height,
+      Logger.info('Decoded image dimensions: ${image.width}x${image.height}');
+
+      // Use the new method for detecting faces from image files
+      // This handles JPEG/PNG files properly
+      final faces = await _faceDetectionService.detectFacesFromImageFile(
+        imageBytes, // Pass original file bytes
       );
+
+      Logger.info('Face detection completed: ${faces.length} face(s) found');
 
       if (faces.isEmpty) {
         Logger.debug('No faces detected in image');

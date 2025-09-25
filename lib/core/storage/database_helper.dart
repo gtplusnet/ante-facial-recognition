@@ -12,7 +12,7 @@ class DatabaseHelper {
   DatabaseHelper();
 
   static const String _databaseName = 'ante_facial_recognition.db';
-  static const int _databaseVersion = 2; // Incremented for timestamp column migration
+  static const int _databaseVersion = 3; // Incremented for image_bytes column in face_encodings
 
   Future<Database> get database async {
     if (_database != null) return _database!;
@@ -203,6 +203,74 @@ class DatabaseHelper {
           )
         ''');
         Logger.database('Successfully recreated face_recognition_logs table with timestamp column');
+      }
+    }
+
+    if (oldVersion < 3) {
+      // Migration for version 3: Add image_bytes column to face_encodings table
+      Logger.database('Migrating to version 3: Adding image_bytes column to face_encodings table...');
+
+      try {
+        // Check if face_encodings table exists
+        final tables = await db.rawQuery(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name='face_encodings'"
+        );
+
+        if (tables.isNotEmpty) {
+          // Check if the image_bytes column exists
+          final tableInfo = await db.rawQuery('PRAGMA table_info(face_encodings)');
+          final hasImageBytes = tableInfo.any((column) => column['name'] == 'image_bytes');
+
+          if (!hasImageBytes) {
+            Logger.database('Adding image_bytes column to face_encodings table...');
+
+            // Add the column (SQLite allows adding nullable columns)
+            await db.execute('ALTER TABLE face_encodings ADD COLUMN image_bytes BLOB');
+
+            Logger.database('Successfully added image_bytes column to face_encodings table');
+          } else {
+            Logger.database('Image_bytes column already exists in face_encodings table');
+          }
+        } else {
+          Logger.database('face_encodings table does not exist, will be created with new schema');
+        }
+
+        // Also ensure face_images table exists
+        final faceImagesTables = await db.rawQuery(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name='face_images'"
+        );
+
+        if (faceImagesTables.isEmpty) {
+          Logger.database('Creating face_images table...');
+
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS face_images (
+              id TEXT PRIMARY KEY,
+              employee_id TEXT NOT NULL,
+              image_bytes BLOB NOT NULL,
+              source TEXT,
+              captured_at TEXT NOT NULL,
+              encoding_id TEXT,
+              quality REAL,
+              created_at TEXT NOT NULL,
+              updated_at TEXT,
+              FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+            )
+          ''');
+
+          // Create index for faster queries
+          await db.execute(
+            'CREATE INDEX IF NOT EXISTS idx_face_images_employee_id ON face_images(employee_id)'
+          );
+
+          Logger.database('Successfully created face_images table');
+        } else {
+          Logger.database('face_images table already exists');
+        }
+
+      } catch (e) {
+        Logger.error('Failed to migrate to version 3', error: e);
+        // Continue anyway - the app will work with the new schema for new installs
       }
     }
   }

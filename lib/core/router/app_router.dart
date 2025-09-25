@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../features/authentication/presentation/pages/device_setup_page.dart';
+import '../../features/employee/presentation/pages/employee_detail_page.dart';
 import '../../features/employee/presentation/pages/employee_list_page.dart';
+import '../../features/employee/presentation/screens/add_face_camera_screen.dart';
 import '../../features/face_recognition/presentation/pages/simplified_camera_screen.dart';
 import '../../features/logs/presentation/pages/face_recognition_logs_page.dart';
 import '../../features/main_shell/presentation/pages/main_shell_page.dart';
@@ -40,24 +42,7 @@ class AppRouter {
           return MainShellPage(navigationShell: navigationShell);
         },
         branches: [
-          StatefulShellBranch(
-            routes: [
-              GoRoute(
-                path: '/face-recognition',
-                name: 'faceRecognition',
-                builder: (context, state) => const SimplifiedCameraScreen(),
-              ),
-            ],
-          ),
-          StatefulShellBranch(
-            routes: [
-              GoRoute(
-                path: '/employees',
-                name: 'employees',
-                builder: (context, state) => const EmployeeListPage(),
-              ),
-            ],
-          ),
+          // Logs is now first (index 0) - default page
           StatefulShellBranch(
             routes: [
               GoRoute(
@@ -67,6 +52,50 @@ class AppRouter {
               ),
             ],
           ),
+          // Recognition is now second (index 1)
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/face-recognition',
+                name: 'faceRecognition',
+                builder: (context, state) => const SimplifiedCameraScreen(),
+              ),
+            ],
+          ),
+          // Employees is now third (index 2)
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/employees',
+                name: 'employees',
+                builder: (context, state) => const EmployeeListPage(),
+                routes: [
+                  GoRoute(
+                    path: ':id',
+                    name: 'employeeDetail',
+                    parentNavigatorKey: _rootNavigatorKey,
+                    builder: (context, state) {
+                      final employeeId = state.pathParameters['id']!;
+                      return EmployeeDetailPage(employeeId: employeeId);
+                    },
+                    routes: [
+                      GoRoute(
+                        path: 'add-face',
+                        name: 'addEmployeeFace',
+                        parentNavigatorKey: _rootNavigatorKey,
+                        builder: (context, state) {
+                          final employeeId = state.pathParameters['id']!;
+                          // We'll create this screen next
+                          return AddFaceCameraScreen(employeeId: employeeId);
+                        },
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ],
+          ),
+          // Settings remains fourth (index 3)
           StatefulShellBranch(
             routes: [
               GoRoute(

@@ -12,7 +12,7 @@ class AppConstants {
   static const double livenessThreshold = 0.9;
   static const double qualityThreshold = 0.9;
   static const int faceImageSize = 112;
-  static const int embeddingSize = 128;
+  static const int embeddingSize = 192; // Updated to match verified MobileFaceNet model
 
   // Performance
   static const int maxRecognitionTime = 100; // milliseconds

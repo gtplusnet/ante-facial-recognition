@@ -16,6 +16,7 @@ class EmployeeModel extends Employee {
     super.photoUrl,
     super.photoBytes,
     super.faceEncodings,
+    super.faceImages,
     super.lastSyncedAt,
     super.createdAt,
     super.updatedAt,
@@ -72,6 +73,7 @@ class FaceEncodingModel extends FaceEncoding {
     required super.quality,
     required super.createdAt,
     super.source,
+    super.imageBytes,
     super.metadata,
   });
 

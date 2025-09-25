@@ -6,7 +6,9 @@ import 'package:sqflite/sqflite.dart';
 
 import '../../../../core/utils/logger.dart';
 import '../../domain/entities/employee.dart';
+import '../../domain/entities/face_image.dart';
 import '../models/employee_model.dart';
+import '../models/face_image_model.dart';
 
 class EmployeeLocalDataSource {
   final Database _database;
@@ -18,17 +20,19 @@ class EmployeeLocalDataSource {
   static const String _employeesTable = 'employees';
   static const String _timeRecordsTable = 'time_records';
   static const String _faceEncodingsTable = 'face_encodings';
+  static const String _faceImagesTable = 'face_images';
   static const String _syncMetadataTable = 'sync_metadata';
 
-  /// Helper method to build EmployeeModel from database map with face encodings
+  /// Helper method to build EmployeeModel from database map with face encodings and images
   EmployeeModel _buildEmployeeFromDatabase(
     Map<String, dynamic> map,
-    List<FaceEncoding> encodings,
-  ) {
+    List<FaceEncoding> encodings, [
+    List<FaceImage>? faceImages,
+  ]) {
     // Use the fromDatabase constructor for basic employee data
     final employee = EmployeeModel.fromDatabase(map);
 
-    // Create a new instance with the face encodings
+    // Create a new instance with the face encodings and images
     return EmployeeModel(
       id: employee.id,
       name: employee.name,
@@ -40,6 +44,7 @@ class EmployeeLocalDataSource {
       photoUrl: employee.photoUrl,
       photoBytes: employee.photoBytes,
       faceEncodings: encodings,
+      faceImages: faceImages ?? [],
       isActive: employee.isActive,
       metadata: employee.metadata,
       createdAt: employee.createdAt,
@@ -99,6 +104,7 @@ class EmployeeLocalDataSource {
         quality REAL NOT NULL,
         source TEXT,
         metadata TEXT,
+        image_bytes BLOB,
         created_at TEXT NOT NULL,
         FOREIGN KEY (employee_id) REFERENCES $_employeesTable(id)
       )
@@ -112,11 +118,27 @@ class EmployeeLocalDataSource {
       )
     ''');
 
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS $_faceImagesTable (
+        id TEXT PRIMARY KEY,
+        employee_id TEXT NOT NULL,
+        image_bytes BLOB NOT NULL,
+        source TEXT NOT NULL,
+        captured_at TEXT NOT NULL,
+        encoding_id TEXT,
+        quality REAL,
+        metadata TEXT,
+        FOREIGN KEY (employee_id) REFERENCES $_employeesTable(id),
+        FOREIGN KEY (encoding_id) REFERENCES $_faceEncodingsTable(id)
+      )
+    ''');
+
     // Create indexes for better performance
     await db.execute('CREATE INDEX IF NOT EXISTS idx_employee_code ON $_employeesTable(employee_code)');
     await db.execute('CREATE INDEX IF NOT EXISTS idx_time_records_employee ON $_timeRecordsTable(employee_id)');
     await db.execute('CREATE INDEX IF NOT EXISTS idx_time_records_date ON $_timeRecordsTable(clock_in_time)');
     await db.execute('CREATE INDEX IF NOT EXISTS idx_face_encodings_employee ON $_faceEncodingsTable(employee_id)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_face_images_employee ON $_faceImagesTable(employee_id)');
   }
 
   /// Get all employees
@@ -275,6 +297,7 @@ class EmployeeLocalDataSource {
           quality: map['quality'],
           createdAt: DateTime.parse(map['created_at']),
           source: map['source'],
+          imageBytes: map['image_bytes'] as Uint8List?,
           metadata: map['metadata'] != null ? json.decode(map['metadata']) : null,
         );
       }).toList();
@@ -296,6 +319,7 @@ class EmployeeLocalDataSource {
           'quality': encoding.quality,
           'source': encoding.source,
           'metadata': encoding.metadata != null ? json.encode(encoding.metadata) : null,
+          'image_bytes': encoding.imageBytes, // Store the image bytes
           'created_at': encoding.createdAt.toIso8601String(),
         },
         conflictAlgorithm: ConflictAlgorithm.replace,
@@ -456,9 +480,11 @@ class EmployeeLocalDataSource {
         try {
           // Get face encodings for each employee
           final encodings = await getFaceEncodings(map['id']);
+          // Get face images for each employee
+          final faceImages = await getFaceImages(map['id']);
 
-          // Use the helper method to build employee with encodings
-          final employee = _buildEmployeeFromDatabase(map, encodings);
+          // Use the helper method to build employee with encodings and images
+          final employee = _buildEmployeeFromDatabase(map, encodings, faceImages);
           employees.add(employee);
         } catch (e) {
           Logger.error('Failed to parse employee from database', error: e);
@@ -470,6 +496,124 @@ class EmployeeLocalDataSource {
     } catch (e) {
       Logger.error('Failed to get all employees', error: e);
       throw Exception('Failed to get all employees: $e');
+    }
+  }
+
+  /// Get a single employee by ID
+  Future<Employee?> getEmployeeById(String employeeId) async {
+    try {
+      final List<Map<String, dynamic>> maps = await _database.query(
+        _employeesTable,
+        where: 'id = ?',
+        whereArgs: [employeeId],
+        limit: 1,
+      );
+
+      if (maps.isEmpty) {
+        return null;
+      }
+
+      // Get face encodings for the employee
+      final encodings = await getFaceEncodings(employeeId);
+      // Get face images for the employee
+      final faceImages = await getFaceImages(employeeId);
+
+      // Use the helper method to build employee with encodings and images
+      return _buildEmployeeFromDatabase(maps.first, encodings, faceImages);
+    } catch (e) {
+      Logger.error('Failed to get employee by ID', error: e);
+      return null;
+    }
+  }
+
+  /// Delete a face encoding
+  Future<void> deleteFaceEncoding(String encodingId) async {
+    try {
+      await _database.delete(
+        _faceEncodingsTable,
+        where: 'id = ?',
+        whereArgs: [encodingId],
+      );
+      Logger.debug('Deleted face encoding $encodingId');
+    } catch (e) {
+      Logger.error('Failed to delete face encoding', error: e);
+      throw Exception('Failed to delete face encoding: $e');
+    }
+  }
+
+  /// Get face images for an employee
+  Future<List<FaceImage>> getFaceImages(String employeeId) async {
+    try {
+      final List<Map<String, dynamic>> maps = await _database.query(
+        _faceImagesTable,
+        where: 'employee_id = ?',
+        whereArgs: [employeeId],
+        orderBy: 'captured_at DESC',
+      );
+
+      return maps.map((map) => FaceImageModel.fromDatabase(map)).toList();
+    } catch (e) {
+      Logger.error('Failed to get face images for $employeeId', error: e);
+      return [];
+    }
+  }
+
+  /// Save a face image
+  Future<void> saveFaceImage(FaceImageModel faceImage) async {
+    try {
+      await _database.insert(
+        _faceImagesTable,
+        faceImage.toDatabase(),
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+      Logger.debug('Saved face image ${faceImage.id} for employee ${faceImage.employeeId}');
+    } catch (e) {
+      Logger.error('Failed to save face image', error: e);
+      throw Exception('Failed to save face image: $e');
+    }
+  }
+
+  /// Delete a face image
+  Future<void> deleteFaceImage(String imageId) async {
+    try {
+      await _database.delete(
+        _faceImagesTable,
+        where: 'id = ?',
+        whereArgs: [imageId],
+      );
+      Logger.debug('Deleted face image $imageId');
+    } catch (e) {
+      Logger.error('Failed to delete face image', error: e);
+      throw Exception('Failed to delete face image: $e');
+    }
+  }
+
+  /// Get a single face image by ID
+  Future<FaceImage?> getFaceImageById(String imageId) async {
+    try {
+      final List<Map<String, dynamic>> maps = await _database.query(
+        _faceImagesTable,
+        where: 'id = ?',
+        whereArgs: [imageId],
+        limit: 1,
+      );
+
+      if (maps.isEmpty) return null;
+      return FaceImageModel.fromDatabase(maps.first);
+    } catch (e) {
+      Logger.error('Failed to get face image by ID', error: e);
+      return null;
+    }
+  }
+
+  /// Clear all face encodings from database (useful for dimension migration)
+  Future<void> clearAllFaceEncodings() async {
+    try {
+      await _database.delete(_faceEncodingsTable);
+      Logger.info('Cleared all face encodings from database');
+    } catch (e) {
+      Logger.error('Failed to clear face encodings', error: e);
+      throw Exception('Failed to clear face encodings: $e');
     }
   }
 }

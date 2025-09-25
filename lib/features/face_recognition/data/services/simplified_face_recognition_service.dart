@@ -21,6 +21,7 @@ class SimplifiedFaceRecognitionService {
   // In-memory storage for employees and encodings
   final Map<String, Employee> _employees = {};
   final Map<String, Float32List> _encodings = {};
+  final Map<String, List<Float32List>> _multiEncodings = {};
 
   bool _isInitialized = false;
 
@@ -58,23 +59,37 @@ class SimplifiedFaceRecognitionService {
 
       _employees.clear();
       _encodings.clear();
+      _multiEncodings.clear();
 
       for (final employee in employees) {
         _employees[employee.id] = employee;
 
-        // Load face encoding if available
+        // Load ALL face encodings for better matching
         if (employee.faceEncodings.isNotEmpty) {
-          // Use the first face encoding for simplicity
-          final encoding = employee.faceEncodings.first;
-          _encodings[employee.id] = Float32List.fromList(encoding.embedding);
+          // Store all encodings for multi-encoding matching
+          _multiEncodings[employee.id] = employee.faceEncodings
+              .map((e) => Float32List.fromList(e.embedding))
+              .toList();
+
+          // Keep first encoding for backward compatibility
+          _encodings[employee.id] = Float32List.fromList(
+            employee.faceEncodings.first.embedding,
+          );
         }
       }
 
-      Logger.info('Loaded ${_employees.length} employees, ${_encodings.length} have face encodings');
+      Logger.info('Loaded ${_employees.length} employees');
+      Logger.info('${_multiEncodings.length} employees have face encodings');
+      Logger.info('Total encodings: ${_multiEncodings.values.expand((e) => e).length}');
     } catch (e) {
       Logger.error('Failed to load employees', error: e);
       throw Exception('Employee loading failed: $e');
     }
+  }
+
+  /// Public method to reload employees (for use after adding/deleting face images)
+  Future<void> loadEmployees() async {
+    await _loadEmployees();
   }
 
   /// Process camera frame for face recognition
@@ -139,16 +154,20 @@ class SimplifiedFaceRecognitionService {
 
       Logger.success('Face quality acceptable: ${encodingResult.quality}');
 
-      // Find best match
+      // Find best match using multi-encoding approach
       Logger.info('Step 3: Finding best match...');
-      Logger.info('Available employee IDs for matching: ${_encodings.keys.toList()}');
+      Logger.info('Available employee IDs for matching: ${_multiEncodings.keys.toList()}');
 
       final matchStopwatch = Stopwatch()..start();
-      final matchResult = _faceEncodingService.findBestMatch(
+
+      // Try multi-encoding matching first
+      // Use faceMatchDistance (0.6) instead of confidenceThreshold (0.7)
+      Logger.info('Using distance threshold: ${_config.faceMatchDistance} (not confidence threshold: ${_config.confidenceThreshold})');
+      final matchResult = _findBestMultiEncodingMatch(
         encodingResult.embedding,
-        _encodings,
-        threshold: _config.confidenceThreshold,
+        threshold: _config.faceMatchDistance,  // Use distance threshold, not confidence
       );
+
       matchStopwatch.stop();
 
       Logger.info('Face matching completed in ${matchStopwatch.elapsedMilliseconds}ms');
@@ -238,10 +257,11 @@ class SimplifiedFaceRecognitionService {
 
       // Find best match
       Logger.info('Step 3: Finding best match...');
+      Logger.info('Using distance threshold: ${_config.faceMatchDistance} (not confidence threshold: ${_config.confidenceThreshold})');
       final matchResult = _faceEncodingService.findBestMatch(
         encodingResult.embedding,
         _encodings,
-        threshold: _config.confidenceThreshold,
+        threshold: _config.faceMatchDistance,  // Use distance threshold, not confidence
       );
 
       if (matchResult == null || !matchResult.isMatch) {
@@ -291,6 +311,104 @@ class SimplifiedFaceRecognitionService {
     } else {
       return 'Face quality good';
     }
+  }
+
+  /// Find best match using multiple encodings per employee
+  SimpleFaceMatchResult? _findBestMultiEncodingMatch(
+    Float32List inputEmbedding, {
+    required double threshold,
+  }) {
+    Logger.info('=== MATCHING PROCESS START ===');
+    Logger.info('Input embedding length: ${inputEmbedding.length}');
+    Logger.info('Threshold: $threshold');
+    Logger.info('Number of employees to match: ${_multiEncodings.length}');
+
+    if (_multiEncodings.isEmpty) {
+      Logger.warning('No multi-encodings available, falling back to single encoding matching');
+      // Fall back to single encoding matching
+      return _faceEncodingService.findBestMatch(
+        inputEmbedding,
+        _encodings,
+        threshold: threshold,
+      );
+    }
+
+    String? bestEmployeeId;
+    double bestConfidence = 0;
+    double bestDistance = double.infinity;
+
+    // Log first few values of input embedding for debugging
+    final inputSample = inputEmbedding.take(5).map((e) => e.toStringAsFixed(4)).join(', ');
+    Logger.debug('Input embedding sample (first 5): [$inputSample]');
+
+    // Check each employee's multiple encodings
+    int employeeIndex = 0;
+    for (final entry in _multiEncodings.entries) {
+      employeeIndex++;
+      final employeeId = entry.key;
+      final encodings = entry.value;
+      final employeeName = _employees[employeeId]?.name ?? 'Unknown';
+
+      Logger.debug('Checking employee $employeeIndex/${_multiEncodings.length}: $employeeName (ID: $employeeId)');
+      Logger.debug('  - Number of encodings: ${encodings.length}');
+
+      // Find the best match among all encodings for this employee
+      double minDistance = double.infinity;
+      int encodingIndex = 0;
+      for (final encoding in encodings) {
+        encodingIndex++;
+        // Compare faces using existing method
+        final result = _faceEncodingService.compareFaces(
+          inputEmbedding,
+          encoding,
+          threshold: threshold,
+        );
+
+        Logger.debug('    Encoding $encodingIndex/${encodings.length}: distance=${result.distance.toStringAsFixed(4)}, similarity=${result.similarity.toStringAsFixed(4)}');
+
+        if (result.distance < minDistance) {
+          minDistance = result.distance;
+          Logger.debug('    NEW MIN DISTANCE for $employeeName: ${minDistance.toStringAsFixed(4)}');
+        }
+      }
+
+      // Convert distance to confidence (0.0 to 1.0)
+      // Smaller distance means higher confidence
+      final confidence = 1.0 / (1.0 + minDistance);
+
+      Logger.debug('  Final for $employeeName: minDistance=${minDistance.toStringAsFixed(4)}, confidence=${confidence.toStringAsFixed(4)}');
+      Logger.debug('  Meets threshold? ${minDistance < threshold} (${minDistance.toStringAsFixed(4)} < $threshold)');
+
+      if (confidence > bestConfidence && minDistance < threshold) {
+        Logger.success('  ✓ NEW BEST MATCH: $employeeName');
+        bestEmployeeId = employeeId;
+        bestConfidence = confidence;
+        bestDistance = minDistance;
+      }
+    }
+
+    if (bestEmployeeId != null) {
+      final matchedEmployee = _employees[bestEmployeeId]?.name ?? 'Unknown';
+      Logger.success('=== MATCH FOUND ===');
+      Logger.success('Employee: $matchedEmployee (ID: $bestEmployeeId)');
+      Logger.success('Confidence: ${(bestConfidence * 100).toStringAsFixed(1)}%');
+      Logger.success('Distance: ${bestDistance.toStringAsFixed(4)}');
+      Logger.info('=== MATCHING PROCESS END ===');
+
+      return SimpleFaceMatchResult(
+        isMatch: true,
+        distance: bestDistance,
+        similarity: 1.0 - bestDistance,
+        confidence: bestConfidence,
+        threshold: threshold,
+        matchedId: bestEmployeeId,
+      );
+    }
+
+    Logger.warning('=== NO MATCH FOUND ===');
+    Logger.warning('Best distance was: ${bestDistance.toStringAsFixed(4)} (threshold: $threshold)');
+    Logger.info('=== MATCHING PROCESS END ===');
+    return null;
   }
 
   /// Reload employees and their face encodings

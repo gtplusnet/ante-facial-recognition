@@ -247,7 +247,7 @@ class _EmployeeListPageState extends State<EmployeeListPage> {
           return EmployeeListItem(
             employee: employee,
             onTap: () {
-              // TODO: Navigate to employee detail
+              context.push('/employees/${employee.id}');
             },
             onGenerateEmbedding: () {
               context
