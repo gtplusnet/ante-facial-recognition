@@ -68,14 +68,17 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
 
   // Processing control
   bool _isProcessing = false;
+  bool _isRecognizing = false;  // Separate flag for face recognition
   bool _isDisposing = false;
+  bool _isDialogOpen = false;  // Track if success dialog is visible
   DateTime? _lastProcessTime;
-  static const _processingInterval = Duration(milliseconds: 800);
+  static const _processingInterval = Duration(milliseconds: 200);
 
   // Frame management
   int _frameDropCount = 0;
   int _frameCounter = 0;
   static const int _maxFrameDrops = 5;
+  int _frameSkipInterval = 1; // Process every Nth frame, increases with load
 
   // Error handling and retry logic
   int _consecutiveErrors = 0;
@@ -93,7 +96,6 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
   double _faceQuality = 0.0;
   String _statusMessage = 'Initializing...';
   bool _isFaceNotRecognized = false;
-  DateTime? _lastRecognitionTime;
   FaceRecognitionStats? _stats;
   bool _showPercentage = false; // Control percentage visibility
   bool _mlKitError = false;
@@ -331,18 +333,34 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
           return;
         }
 
-        // Skip frame if already processing (prevent backlog)
-        if (_isProcessing) {
+        // Dynamic frame skipping based on processing load
+        _frameCounter++;
+
+        // Skip frame if already processing or dialog is open
+        if (_isProcessing || _isDialogOpen) {
           _frameDropCount++;
+          // Increase skip interval if dropping too many frames
           if (_frameDropCount > _maxFrameDrops) {
             Logger.warning('Dropping frames due to slow processing: $_frameDropCount');
+            _frameSkipInterval = (_frameSkipInterval * 2).clamp(1, 8);
+            Logger.info('Increased frame skip interval to: $_frameSkipInterval');
             _frameDropCount = 0; // Reset counter
           }
           return;
         }
 
-        // Reset frame drop counter on successful processing
+        // Skip frames based on interval to reduce load
+        if (_frameCounter % _frameSkipInterval != 0) {
+          return;
+        }
+
+        // Reset frame drop counter and adjust skip interval on successful processing
         _frameDropCount = 0;
+        // Gradually reduce skip interval when processing is smooth
+        if (_frameSkipInterval > 1 && _frameCounter % 30 == 0) {
+          _frameSkipInterval = (_frameSkipInterval - 1).clamp(1, 8);
+          Logger.debug('Reduced frame skip interval to: $_frameSkipInterval');
+        }
 
         // Throttle processing
         if (_lastProcessTime != null &&
@@ -482,12 +500,13 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
     Logger.debug('Processing frame...');
     _frameCounter++;
 
-    // Enhanced verification with disposal check
+    // Enhanced verification with disposal and dialog check
     if (_isDisposing ||
         !mounted ||
+        _isDialogOpen ||  // Skip if dialog is open
         _cameraController?.value.isInitialized != true ||
         _cameraController?.value.isStreamingImages != true) {
-      Logger.warning('Skipping frame processing - widget state not ready');
+      Logger.warning('Skipping frame processing - widget state not ready or dialog open');
       return;
     }
 
@@ -566,10 +585,13 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
         _resetErrorState();
       }
 
-      // Trigger face recognition if quality is good and enough time has passed
-      if (_faceQuality >= 0.7 && _canTriggerRecognition()) {
+      // Trigger face recognition if quality is good, dialog not open, and enough time has passed
+      if (_faceQuality >= 0.7 && !_isDialogOpen && _canTriggerRecognition()) {
         Logger.success('🎯 Quality threshold met: ${(_faceQuality * 100).toInt()}% >= 70%');
-        await _triggerFaceRecognition(image);
+        // Don't await - process asynchronously to avoid blocking camera stream
+        _triggerFaceRecognition(image).catchError((e) {
+          Logger.error('Face recognition error', error: e);
+        });
       } else if (_faceQuality >= 0.6 && _frameCounter % 30 == 0) {
         Logger.debug('Quality approaching threshold: ${(_faceQuality * 100).toInt()}%');
       } else if (_isFaceDetected && _frameCounter % 60 == 0) {
@@ -590,15 +612,24 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
   }
 
   Future<void> _triggerFaceRecognition(CameraImage image) async {
+    // Skip if already recognizing to prevent queue buildup
+    if (_isRecognizing) {
+      Logger.debug('Skipping face recognition - already processing');
+      return;
+    }
+
+    _isRecognizing = true;
     try {
-      setState(() {
-        _statusMessage = 'Processing face...';
-      });
+      // Update status without blocking
+      if (mounted) {
+        setState(() {
+          _statusMessage = 'Processing face...';
+        });
+      }
 
       Logger.info('=== FACE RECOGNITION TRIGGERED ===');
       Logger.info('Face recognition triggered - Quality: ${(_faceQuality * 100).toInt()}%');
       Logger.info('Can trigger recognition: ${_canTriggerRecognition()}');
-      Logger.info('Last recognition time: $_lastRecognitionTime');
       Logger.info('Frame counter: $_frameCounter');
       Logger.info('Detected faces count: ${_detectedFaces?.length ?? 0}');
       Logger.info('Starting face encoding extraction...');
@@ -616,16 +647,49 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
 
       final stopwatch = Stopwatch()..start();
 
-      Logger.info('Calling face recognition service...');
-      final result = await _faceRecognitionService.processFrame(image, cameraDescription);
+      Logger.info('Calling face recognition service asynchronously...');
 
-      stopwatch.stop();
-      Logger.info('Face recognition service completed in ${stopwatch.elapsedMilliseconds}ms');
+      // Process asynchronously without blocking the UI thread
+      _faceRecognitionService.processFrame(image, cameraDescription).then((result) {
+        if (!mounted || _isDisposing) return;
 
-      if (result == null) {
-        Logger.warning('Face recognition service returned null result');
-        return;
+        stopwatch.stop();
+        Logger.info('Face recognition completed in ${stopwatch.elapsedMilliseconds}ms');
+
+        if (result != null) {
+          _handleRecognitionResult(result, image);
+        } else {
+          Logger.warning('Face recognition service returned null');
+          setState(() {
+            _statusMessage = 'Ready';
+          });
+        }
+      }).catchError((e) {
+        Logger.error('Face recognition failed', error: e);
+        if (mounted) {
+          setState(() {
+            _statusMessage = 'Recognition error';
+          });
+        }
+      }).whenComplete(() {
+        _isRecognizing = false;
+      });
+
+    } catch (e, stackTrace) {
+      Logger.error('Face recognition error', error: e);
+      Logger.error('Stack trace: $stackTrace');
+      _isRecognizing = false;
+      if (mounted) {
+        setState(() {
+          _statusMessage = 'Recognition error';
+        });
       }
+    }
+  }
+
+  /// Handle recognition result in a separate method
+  void _handleRecognitionResult(FaceRecognitionResult result, CameraImage image) {
+    if (!mounted || _isDisposing) return;
 
       Logger.info('Recognition result type: ${result.type}');
       Logger.info('Recognition result confidence: ${result.confidence}');
@@ -645,9 +709,17 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
             setState(() {
               _statusMessage = 'Welcome, ${result.employee!.name}!';
               _isFaceNotRecognized = false; // Reset unrecognized state
-              _lastRecognitionTime = DateTime.now();
             });
             _showSuccessDialog(result.employee!, result.confidence ?? 0.0);
+
+            // Reset status message after 3 seconds
+            Timer(const Duration(seconds: 3), () {
+              if (mounted) {
+                setState(() {
+                  _statusMessage = 'Ready (${_stats?.totalEmployees ?? 0} employees)';
+                });
+              }
+            });
           }
           break;
 
@@ -656,9 +728,17 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
           setState(() {
             _statusMessage = 'Face not recognized';
             _isFaceNotRecognized = true;
-            _lastRecognitionTime = DateTime.now();
           });
-          _showUnrecognizedFaceOverlay();
+
+          // Auto-hide indicator and reset status after 2 seconds
+          Timer(const Duration(seconds: 2), () {
+            if (mounted) {
+              setState(() {
+                _isFaceNotRecognized = false;
+                _statusMessage = 'Ready (${_stats?.totalEmployees ?? 0} employees)';
+              });
+            }
+          });
           break;
 
         case FaceRecognitionResultType.poorQuality:
@@ -696,38 +776,39 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
       }
       Logger.info('=== RECOGNITION RESULT PROCESSING COMPLETE ===');
 
-      // Log the recognition result with images (async, no await to avoid blocking UI)
-      _logRecognitionResult(result, stopwatch.elapsedMilliseconds, image).catchError((e) {
-        Logger.error('Failed to log recognition result', error: e);
-      });
-
-    } catch (e) {
-      _handleProcessingError('Face recognition', e);
-    }
+      // Only log successful face matches to the database
+      if (result.type == FaceRecognitionResultType.matched && result.employee != null) {
+        _logRecognitionResult(result, 0, image).catchError((e) {
+          Logger.error('Failed to log recognition result', error: e);
+        });
+      }
+      // Skip logging for unrecognized faces, poor quality, no face, or errors
   }
 
   void _showSuccessDialog(Employee employee, double confidence) {
+    setState(() {
+      _isDialogOpen = true;  // Disable processing while dialog is shown
+    });
+
     EmployeeConfirmationDialog.show(
       context: context,
       employee: employee,
       confidence: confidence,
       currentStatus: null,
-    );
+    ).then((_) {
+      // Dialog closed (either by user or auto-dismiss after 3 seconds)
+      if (mounted) {
+        setState(() {
+          _isDialogOpen = false;  // Re-enable processing
+        });
+      }
+    });
   }
 
   /// Check if enough time has passed since the last recognition to allow a new one
   bool _canTriggerRecognition() {
-    if (_lastRecognitionTime == null) return true;
-
-    final timeSinceLastRecognition = DateTime.now().difference(_lastRecognitionTime!);
-
-    // Allow new recognition after 5 seconds for successful matches
-    // Allow new recognition after 3 seconds for failed matches
-    final cooldownDuration = _isFaceNotRecognized
-        ? const Duration(seconds: 3)
-        : const Duration(seconds: 5);
-
-    return timeSinceLastRecognition >= cooldownDuration;
+    // Always allow recognition - no cooldown needed
+    return true;
   }
 
   /// Log recognition result with camera image and detected faces
@@ -1392,124 +1473,49 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
       return const SizedBox.shrink();
     }
 
-    return Positioned.fill(
+    // Simple non-blocking indicator at the top
+    return Positioned(
+      top: MediaQuery.of(context).padding.top + 100.h,
+      left: 20.w,
+      right: 20.w,
       child: IgnorePointer(
-        child: Container(
-          decoration: BoxDecoration(
-            border: Border.all(
-              color: Colors.red.withOpacity(0.8),
-              width: 4.0,
+        child: AnimatedOpacity(
+          opacity: _isFaceNotRecognized ? 1.0 : 0.0,
+          duration: const Duration(milliseconds: 300),
+          child: Center(
+            child: Container(
+              padding: EdgeInsets.symmetric(horizontal: 16.w, vertical: 12.h),
+              decoration: BoxDecoration(
+                color: Colors.red.withOpacity(0.9),
+                borderRadius: BorderRadius.circular(8.r),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.error_outline,
+                    color: Colors.white,
+                    size: 20.sp,
+                  ),
+                  SizedBox(width: 8.w),
+                  Text(
+                    'Face not recognized',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 14.sp,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-          child: Stack(
-            children: [
-              // Red overlay with opacity
-              Container(
-                color: Colors.red.withOpacity(0.1),
-              ),
-
-              // Center message
-              Center(
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 300),
-                  padding: EdgeInsets.symmetric(horizontal: 24.w, vertical: 16.h),
-                  decoration: BoxDecoration(
-                    color: Colors.red.withOpacity(0.9),
-                    borderRadius: BorderRadius.circular(12.r),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.red.withOpacity(0.3),
-                        blurRadius: 12,
-                        spreadRadius: 2,
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.person_off,
-                        color: Colors.white,
-                        size: 48.sp,
-                      ),
-                      SizedBox(height: 12.h),
-                      Text(
-                        'Face Not Recognized',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 18.sp,
-                          fontWeight: FontWeight.bold,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                      SizedBox(height: 8.h),
-                      Text(
-                        'Please try again or contact administrator',
-                        style: TextStyle(
-                          color: Colors.white.withOpacity(0.9),
-                          fontSize: 14.sp,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-
-              // Scanning animation indicator
-              Positioned(
-                bottom: MediaQuery.of(context).size.height * 0.2,
-                left: 0,
-                right: 0,
-                child: Center(
-                  child: Container(
-                    padding: EdgeInsets.symmetric(horizontal: 16.w, vertical: 8.h),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.9),
-                      borderRadius: BorderRadius.circular(20.r),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        SizedBox(
-                          width: 16.w,
-                          height: 16.h,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            valueColor: AlwaysStoppedAnimation<Color>(Colors.red),
-                          ),
-                        ),
-                        SizedBox(width: 8.w),
-                        Text(
-                          'Retrying...',
-                          style: TextStyle(
-                            color: Colors.red,
-                            fontSize: 12.sp,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ],
           ),
         ),
       ),
     );
   }
 
-  void _showUnrecognizedFaceOverlay() {
-    // Auto-hide the overlay after 3 seconds
-    Timer(const Duration(seconds: 3), () {
-      if (mounted) {
-        setState(() {
-          _isFaceNotRecognized = false;
-        });
-      }
-    });
-  }
 
   Widget _buildTopBar() {
     return Positioned(
