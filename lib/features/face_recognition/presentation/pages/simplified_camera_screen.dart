@@ -97,7 +97,6 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
   String _statusMessage = 'Initializing...';
   bool _isFaceNotRecognized = false;
   FaceRecognitionStats? _stats;
-  bool _showPercentage = false; // Control percentage visibility
   bool _mlKitError = false;
 
   // Face detection for logging
@@ -1282,9 +1281,7 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
   }
 
   Widget _buildQualityIndicator() {
-    // Always show status indicator
     if (!_isFaceDetected) {
-      // Show appropriate message based on error state
       final statusText = _mlKitError
           ? 'Camera processing error'
           : 'Position your face in the circle';
@@ -1331,141 +1328,7 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
       );
     }
 
-    final qualityPercent = (_faceQuality * 100).toInt();
-    Color indicatorColor;
-    IconData icon;
-
-    if (_faceQuality >= 0.8) {
-      indicatorColor = Colors.green;
-      icon = Icons.check_circle;
-    } else if (_faceQuality >= 0.6) {
-      indicatorColor = Colors.orange;
-      icon = Icons.warning;
-    } else {
-      indicatorColor = Colors.red;
-      icon = Icons.error_outline;
-    }
-
-    return Stack(
-      children: [
-        // Regular quality indicator
-        Positioned(
-          top: MediaQuery.of(context).size.height * 0.25,
-          left: 0,
-          right: 0,
-          child: Center(
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 300),
-              padding: EdgeInsets.symmetric(horizontal: 20.w, vertical: 8.h),
-              decoration: BoxDecoration(
-                color: indicatorColor.withOpacity(0.9),
-                borderRadius: BorderRadius.circular(20.r),
-                boxShadow: [
-                  BoxShadow(
-                    color: indicatorColor.withOpacity(0.3),
-                    blurRadius: 8,
-                    spreadRadius: 1,
-                  ),
-                ],
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    icon,
-                    color: Colors.white,
-                    size: 18.sp,
-                  ),
-                  SizedBox(width: 8.w),
-                  Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        _showPercentage
-                            ? 'Face Quality: $qualityPercent%'
-                            : (_faceQuality >= 0.8
-                                ? 'Good Quality'
-                                : _faceQuality >= 0.6
-                                    ? 'Fair Quality'
-                                    : 'Poor Quality'),
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 14.sp,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      if (_faceQuality < 0.8)
-                        Text(
-                          _faceQuality < 0.5
-                            ? 'Move closer to camera'
-                            : 'Hold steady...',
-                          style: TextStyle(
-                            color: Colors.white70,
-                            fontSize: 11.sp,
-                          ),
-                        ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-
-        // Special 90%+ celebration indicator
-        if (_faceQuality >= 0.9)
-          Positioned(
-            top: MediaQuery.of(context).size.height * 0.18,
-            left: 0,
-            right: 0,
-            child: Center(
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 500),
-                padding: EdgeInsets.symmetric(horizontal: 24.w, vertical: 12.h),
-                decoration: BoxDecoration(
-                  color: Colors.green.withOpacity(0.95),
-                  borderRadius: BorderRadius.circular(25.r),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.green.withOpacity(0.4),
-                      blurRadius: 12,
-                      spreadRadius: 2,
-                    ),
-                  ],
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.star,
-                      color: Colors.white,
-                      size: 20.sp,
-                    ),
-                    SizedBox(width: 8.w),
-                    Text(
-                      _showPercentage
-                          ? '🎯 EXCELLENT: $qualityPercent%'
-                          : '🎯 EXCELLENT QUALITY',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 16.sp,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    SizedBox(width: 8.w),
-                    Icon(
-                      Icons.star,
-                      color: Colors.white,
-                      size: 20.sp,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-      ],
-    );
+    return const SizedBox.shrink();
   }
 
   Widget _buildUnrecognizedFaceOverlay() {
@@ -1607,7 +1470,7 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
       color = Colors.orange;
       icon = Icons.hourglass_empty;
     } else if (_isFaceDetected) {
-      status = 'Quality: ${(_faceQuality * 100).toInt()}%';
+      status = 'Face detected';
       color = _faceQuality >= 0.8 ? Colors.green : Colors.orange;
       icon = Icons.face;
     } else if (_statusMessage.contains('Ready')) {
