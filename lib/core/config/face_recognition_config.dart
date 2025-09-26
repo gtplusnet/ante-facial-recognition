@@ -76,8 +76,11 @@ class FaceRecognitionConfig {
   /// Duration to display feedback messages
   Duration feedbackDisplayDuration = const Duration(seconds: 3);
 
+  /// Enable/disable auto-dismiss for dialogs
+  bool enableAutoDialogDismiss = true;
+
   /// Auto-dismiss timer for dialogs (seconds)
-  int autoDialogDismissSeconds = 3;
+  int autoDialogDismissSeconds = 5;
 
   // ========== Storage Keys ==========
   static const String _storagePrefix = 'face_recognition_config_';
@@ -102,6 +105,7 @@ class FaceRecognitionConfig {
     Duration? errorCooldownDuration,
     int? maxCameraRestarts,
     Duration? feedbackDisplayDuration,
+    bool? enableAutoDialogDismiss,
     int? autoDialogDismissSeconds,
   }) {
     if (confidenceThreshold != null) this.confidenceThreshold = confidenceThreshold;
@@ -122,6 +126,7 @@ class FaceRecognitionConfig {
     if (errorCooldownDuration != null) this.errorCooldownDuration = errorCooldownDuration;
     if (maxCameraRestarts != null) this.maxCameraRestarts = maxCameraRestarts;
     if (feedbackDisplayDuration != null) this.feedbackDisplayDuration = feedbackDisplayDuration;
+    if (enableAutoDialogDismiss != null) this.enableAutoDialogDismiss = enableAutoDialogDismiss;
     if (autoDialogDismissSeconds != null) this.autoDialogDismissSeconds = autoDialogDismissSeconds;
 
     Logger.info('Face recognition config updated');
@@ -147,6 +152,7 @@ class FaceRecognitionConfig {
       sizeScorePower = prefs.getDouble('${_storagePrefix}sizeScorePower') ?? sizeScorePower;
       maxConsecutiveErrors = prefs.getInt('${_storagePrefix}maxConsecutiveErrors') ?? maxConsecutiveErrors;
       maxCameraRestarts = prefs.getInt('${_storagePrefix}maxCameraRestarts') ?? maxCameraRestarts;
+      enableAutoDialogDismiss = prefs.getBool('${_storagePrefix}enableAutoDialogDismiss') ?? enableAutoDialogDismiss;
       autoDialogDismissSeconds = prefs.getInt('${_storagePrefix}autoDialogDismissSeconds') ?? autoDialogDismissSeconds;
 
       // Duration values stored as milliseconds
@@ -196,6 +202,7 @@ class FaceRecognitionConfig {
       await prefs.setDouble('${_storagePrefix}sizeScorePower', sizeScorePower);
       await prefs.setInt('${_storagePrefix}maxConsecutiveErrors', maxConsecutiveErrors);
       await prefs.setInt('${_storagePrefix}maxCameraRestarts', maxCameraRestarts);
+      await prefs.setBool('${_storagePrefix}enableAutoDialogDismiss', enableAutoDialogDismiss);
       await prefs.setInt('${_storagePrefix}autoDialogDismissSeconds', autoDialogDismissSeconds);
 
       // Save durations as milliseconds
@@ -230,7 +237,8 @@ class FaceRecognitionConfig {
     errorCooldownDuration = const Duration(seconds: 10);
     maxCameraRestarts = 3;
     feedbackDisplayDuration = const Duration(seconds: 3);
-    autoDialogDismissSeconds = 3;
+    enableAutoDialogDismiss = true;
+    autoDialogDismissSeconds = 5;
 
     Logger.info('Face recognition config reset to defaults');
     logCurrentConfig();

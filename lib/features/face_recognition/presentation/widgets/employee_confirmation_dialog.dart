@@ -17,6 +17,8 @@ class EmployeeConfirmationDialog extends StatefulWidget {
   final double confidence;
   final String? capturedPhoto;
   final EmployeeTimeRecord? currentStatus;
+  final bool enableAutoClose;
+  final int autoCloseDuration;
 
   const EmployeeConfirmationDialog({
     super.key,
@@ -24,6 +26,8 @@ class EmployeeConfirmationDialog extends StatefulWidget {
     required this.confidence,
     this.capturedPhoto,
     this.currentStatus,
+    this.enableAutoClose = true,
+    this.autoCloseDuration = 3,
   });
 
   static Future<void> show({
@@ -32,6 +36,8 @@ class EmployeeConfirmationDialog extends StatefulWidget {
     required double confidence,
     String? capturedPhoto,
     EmployeeTimeRecord? currentStatus,
+    bool enableAutoClose = true,
+    int autoCloseDuration = 3,
   }) {
     return showDialog(
       context: context,
@@ -41,6 +47,8 @@ class EmployeeConfirmationDialog extends StatefulWidget {
         confidence: confidence,
         capturedPhoto: capturedPhoto,
         currentStatus: currentStatus,
+        enableAutoClose: enableAutoClose,
+        autoCloseDuration: autoCloseDuration,
       ),
     );
   }
@@ -51,12 +59,15 @@ class EmployeeConfirmationDialog extends StatefulWidget {
 
 class _EmployeeConfirmationDialogState extends State<EmployeeConfirmationDialog> {
   Timer? _autoDismissTimer;
-  int _countdown = 3;
+  late int _countdown;
 
   @override
   void initState() {
     super.initState();
-    _startAutoDismissTimer();
+    _countdown = widget.autoCloseDuration;
+    if (widget.enableAutoClose) {
+      _startAutoDismissTimer();
+    }
   }
 
   @override
@@ -100,34 +111,37 @@ class _EmployeeConfirmationDialogState extends State<EmployeeConfirmationDialog>
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                // Auto-dismiss countdown
-                Container(
-                  padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 6.h),
-                  decoration: BoxDecoration(
-                    color: Colors.orange.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(16.r),
-                    border: Border.all(color: Colors.orange.withOpacity(0.3)),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.timer,
-                        size: 16.sp,
-                        color: Colors.orange,
-                      ),
-                      SizedBox(width: 4.w),
-                      Text(
-                        'Auto-close: ${_countdown}s',
-                        style: TextStyle(
-                          fontSize: 12.sp,
+                // Auto-dismiss countdown (only show if enabled)
+                if (widget.enableAutoClose)
+                  Container(
+                    padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 6.h),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(16.r),
+                      border: Border.all(color: Colors.orange.withOpacity(0.3)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.timer,
+                          size: 16.sp,
                           color: Colors.orange,
-                          fontWeight: FontWeight.w500,
                         ),
-                      ),
-                    ],
-                  ),
-                ),
+                        SizedBox(width: 4.w),
+                        Text(
+                          'Auto-close: ${_countdown}s',
+                          style: TextStyle(
+                            fontSize: 12.sp,
+                            color: Colors.orange,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                else
+                  const SizedBox.shrink(),
 
                 // Close button
                 IconButton(

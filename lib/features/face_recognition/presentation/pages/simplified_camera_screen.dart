@@ -12,6 +12,7 @@ import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:visibility_detector/visibility_detector.dart';
 // import 'package:wakelock_plus/wakelock_plus.dart'; // Temporarily disabled
 
+import '../../../../core/config/face_recognition_config.dart';
 import '../../../../core/di/injection.dart';
 import '../../../../core/platform/render_aware_widget.dart';
 import '../../../../core/router/app_router.dart';
@@ -65,6 +66,9 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
 
   // Face recognition log service
   late final FaceRecognitionLogService _logService;
+
+  // Face recognition config
+  final FaceRecognitionConfig _config = FaceRecognitionConfig();
 
   // Processing control
   bool _isProcessing = false;
@@ -794,6 +798,8 @@ class _SimplifiedCameraScreenState extends State<SimplifiedCameraScreen>
       employee: employee,
       confidence: confidence,
       currentStatus: null,
+      enableAutoClose: _config.enableAutoDialogDismiss,
+      autoCloseDuration: _config.autoDialogDismissSeconds,
     ).then((_) {
       // Dialog closed (either by user or auto-dismiss after 3 seconds)
       if (mounted) {

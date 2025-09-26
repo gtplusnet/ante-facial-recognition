@@ -20,6 +20,8 @@ class _FaceRecognitionSettingsPageState
   double _faceMatchDistance = 1.0;
   int _processingIntervalMs = 800;
   int _frameSkipCount = 5;
+  bool _enableAutoDialogDismiss = true;
+  int _autoDialogDismissSeconds = 5;
 
   bool _isLoading = true;
   bool _hasChanges = false;
@@ -41,6 +43,8 @@ class _FaceRecognitionSettingsPageState
         _faceMatchDistance = _config.faceMatchDistance;
         _processingIntervalMs = _config.processingIntervalMs;
         _frameSkipCount = _config.frameSkipCount;
+        _enableAutoDialogDismiss = _config.enableAutoDialogDismiss;
+        _autoDialogDismissSeconds = _config.autoDialogDismissSeconds;
         _isLoading = false;
       });
 
@@ -58,6 +62,8 @@ class _FaceRecognitionSettingsPageState
         faceMatchDistance: _faceMatchDistance,
         processingIntervalMs: _processingIntervalMs,
         frameSkipCount: _frameSkipCount,
+        enableAutoDialogDismiss: _enableAutoDialogDismiss,
+        autoDialogDismissSeconds: _autoDialogDismissSeconds,
       );
 
       await _config.saveToStorage();
@@ -126,6 +132,8 @@ class _FaceRecognitionSettingsPageState
         _faceMatchDistance = _config.faceMatchDistance;
         _processingIntervalMs = _config.processingIntervalMs;
         _frameSkipCount = _config.frameSkipCount;
+        _enableAutoDialogDismiss = _config.enableAutoDialogDismiss;
+        _autoDialogDismissSeconds = _config.autoDialogDismissSeconds;
         _hasChanges = false;
         _isLoading = false;
       });
@@ -192,6 +200,16 @@ class _FaceRecognitionSettingsPageState
                 SizedBox(height: 24.h),
 
                 _buildFrameSkipSlider(theme),
+                SizedBox(height: 32.h),
+
+                _buildSectionHeader('UI Feedback', theme),
+                SizedBox(height: 16.h),
+
+                _buildAutoDialogDismissToggle(theme),
+                if (_enableAutoDialogDismiss) ...[
+                  SizedBox(height: 16.h),
+                  _buildAutoDialogDismissSlider(theme),
+                ],
                 SizedBox(height: 32.h),
 
                 _buildActionButtons(theme),
@@ -314,6 +332,70 @@ class _FaceRecognitionSettingsPageState
         _markChanged();
       },
       infoText: _getFrameSkipInfo(_frameSkipCount),
+    );
+  }
+
+  Widget _buildAutoDialogDismissToggle(ThemeData theme) {
+    return Container(
+      padding: EdgeInsets.all(16.w),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceVariant.withOpacity(0.3),
+        borderRadius: BorderRadius.circular(12.r),
+        border: Border.all(
+          color: theme.colorScheme.outline.withOpacity(0.3),
+          width: 1,
+        ),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Auto-Dismiss Dialogs',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                SizedBox(height: 4.h),
+                Text(
+                  'Automatically close recognition result dialogs',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Switch(
+            value: _enableAutoDialogDismiss,
+            onChanged: (value) {
+              setState(() => _enableAutoDialogDismiss = value);
+              _markChanged();
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAutoDialogDismissSlider(ThemeData theme) {
+    return _buildSliderCard(
+      theme: theme,
+      title: 'Auto-Dismiss Duration',
+      description:
+          'Time before recognition dialogs automatically close. Longer durations give more time to read the message.',
+      value: _autoDialogDismissSeconds.toDouble(),
+      min: 3,
+      max: 20,
+      divisions: 17,
+      valueLabel: '${_autoDialogDismissSeconds}s',
+      onChanged: (value) {
+        setState(() => _autoDialogDismissSeconds = value.round());
+        _markChanged();
+      },
+      infoText: _getAutoDialogDismissInfo(_autoDialogDismissSeconds),
     );
   }
 
@@ -499,6 +581,16 @@ class _FaceRecognitionSettingsPageState
       return '✓ Balanced - Good performance';
     } else {
       return 'ℹ️ Low CPU Usage - May miss quick movements';
+    }
+  }
+
+  String _getAutoDialogDismissInfo(int value) {
+    if (value <= 5) {
+      return '⚡ Fast - Quick workflow';
+    } else if (value <= 10) {
+      return '✓ Balanced - Good readability';
+    } else {
+      return 'ℹ️ Slow - More time to read';
     }
   }
 

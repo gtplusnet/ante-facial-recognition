@@ -10,6 +10,8 @@ class RecognitionResultDialog extends StatefulWidget {
   final String? employeeId;
   final double? confidence;
   final VoidCallback onDismiss;
+  final bool enableAutoClose;
+  final int autoCloseDuration;
 
   const RecognitionResultDialog({
     super.key,
@@ -18,6 +20,8 @@ class RecognitionResultDialog extends StatefulWidget {
     this.employeeId,
     this.confidence,
     required this.onDismiss,
+    this.enableAutoClose = true,
+    this.autoCloseDuration = 3,
   });
 
   @override
@@ -50,12 +54,14 @@ class _RecognitionResultDialogState extends State<RecognitionResultDialog>
 
     _animationController.forward();
 
-    // Auto-dismiss after 3 seconds for both success and failure
-    Future.delayed(const Duration(seconds: 3), () {
-      if (mounted) {
-        _dismissDialog();
-      }
-    });
+    // Auto-dismiss only if enabled
+    if (widget.enableAutoClose) {
+      Future.delayed(Duration(seconds: widget.autoCloseDuration), () {
+        if (mounted) {
+          _dismissDialog();
+        }
+      });
+    }
   }
 
   @override
@@ -269,6 +275,8 @@ Future<void> showRecognitionResultDialog(
   String? employeeId,
   double? confidence,
   required VoidCallback onDismiss,
+  bool enableAutoClose = true,
+  int autoCloseDuration = 3,
 }) async {
   Logger.info('Showing recognition result dialog - Recognized: $isRecognized');
 
@@ -283,6 +291,8 @@ Future<void> showRecognitionResultDialog(
           employeeId: employeeId,
           confidence: confidence,
           onDismiss: onDismiss,
+          enableAutoClose: enableAutoClose,
+          autoCloseDuration: autoCloseDuration,
         );
       },
       transitionDuration: Duration.zero,
