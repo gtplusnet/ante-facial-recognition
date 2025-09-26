@@ -459,18 +459,13 @@ class SettingsPage extends StatelessWidget {
 
               ListTile(
                 leading: Icon(
-                  Icons.camera_alt,
+                  Icons.tune,
                   color: theme.colorScheme.primary,
                 ),
-                title: const Text('Camera Settings'),
-                subtitle: const Text('Configure camera preferences'),
+                title: const Text('Face Recognition Settings'),
+                subtitle: const Text('Adjust quality and matching thresholds'),
                 onTap: () {
-                  // TODO: Implement camera settings
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Camera settings coming soon'),
-                    ),
-                  );
+                  context.push('/settings/face-recognition');
                 },
               ),
 

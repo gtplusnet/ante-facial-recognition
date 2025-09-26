@@ -33,7 +33,7 @@ class FaceRecognitionConfig {
   int frameSkipCount = 5;
 
   /// Processing interval between frames (milliseconds)
-  int processingIntervalMs = 800;
+  int processingIntervalMs = 2000;
 
   // ========== Face Detection Parameters ==========
   /// Minimum face size as percentage of image (0.0 - 1.0)
@@ -217,7 +217,7 @@ class FaceRecognitionConfig {
     faceMatchDistance = 1.0;  // Updated to reasonable threshold for MobileFaceNet
     maxProcessingTimeMs = 1000;
     frameSkipCount = 5;
-    processingIntervalMs = 800;
+    processingIntervalMs = 2000;
     minFaceSize = 0.05;
     minFaceAreaRatio = 0.1;
     maxFaceAreaRatio = 0.8;

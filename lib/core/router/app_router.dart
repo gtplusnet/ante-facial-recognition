@@ -8,6 +8,7 @@ import '../../features/employee/presentation/screens/add_face_camera_screen.dart
 import '../../features/face_recognition/presentation/pages/simplified_camera_screen.dart';
 import '../../features/logs/presentation/pages/face_recognition_logs_page.dart';
 import '../../features/main_shell/presentation/pages/main_shell_page.dart';
+import '../../features/settings/presentation/pages/face_recognition_settings_page.dart';
 import '../../features/settings/presentation/pages/settings_page.dart';
 import '../../features/splash/presentation/pages/splash_page.dart';
 
@@ -103,6 +104,12 @@ class AppRouter {
                 name: 'settings',
                 builder: (context, state) => const SettingsPage(),
                 routes: [
+                  GoRoute(
+                    path: 'face-recognition',
+                    name: 'faceRecognitionSettings',
+                    parentNavigatorKey: _rootNavigatorKey,
+                    builder: (context, state) => const FaceRecognitionSettingsPage(),
+                  ),
                   GoRoute(
                     path: 'admin',
                     name: 'admin',
